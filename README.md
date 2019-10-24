@@ -1,7 +1,8 @@
 # Project Name: LED Cube (Alias - The Cube)
 
 ## Description :
-The first project is an acrylic cube containing addressable LEDs. The device turns on in response to a vertical and hotizontal motion that increases the velocity above a threshold. It shuts down when static - (no motion detected) for 5 seconds. The appearance of the LED changes in response to the velocity and angle the user moves the cube. The central concept is building an entertainment device for consumers of all ages to use. 
+
+The project is an acrylic cube containing addressable LEDs at the bottom. The LED change their brightness and color in response to the motion of the Cube on the x y z plane. When left static (no movement), it serves as a source of ambient light (night light, desk light etc). Removing the device from the charging station, it turns ON and tilting the device at an angle of more than 45 degrees while static it turns OFF. Therefore, it can either serve as an entertainment device or an ambient light source. The Cube is suitable for all ages, and it is an excellent choice for the entire family.
 
 ## The sensor :
 The LED Cube incorporates one sensor at the stage of the initial development. Further, it uses a gyroscope sensor to modulate the mode of operation for the LEDs. Gyroscope sensors are devices that can detect angular velocity. A sensor of this type can detect rotational motion and changes in orientation. The specific gyroscope sensor is listed below:
