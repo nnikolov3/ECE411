@@ -1,13 +1,16 @@
 #include <FastLED.h>
 
 #define LED_PIN     5
-#define NUM_LEDS    9
+#define NUM_LEDS    12
 #define BRIGHTNESS  255
 #define LED_TYPE    WS2812
 #define COLOR_ORDER GRB
+#define BATTERY_PIN 2 //double check
 CRGB leds[NUM_LEDS];
 
 #define UPDATES_PER_SECOND 100
+
+enum state_enum{IDLE1,MODE11,MODE12,MODE0};
 
 
 CRGBPalette16 currentPalette;
@@ -19,43 +22,6 @@ extern const TProgmemPalette16 myRedWhiteBluePalette_p PROGMEM;
 
 
 
-
-
-// I2C device class (I2Cdev) demonstration Arduino sketch for MPU6050 class
-// 10/7/2011 by Jeff Rowberg <jeff@rowberg.net>
-// Updates should (hopefully) always be available at https://github.com/jrowberg/i2cdevlib
-//
-// Changelog:
-//      2013-05-08 - added multiple output formats
-//                 - added seamless Fastwire support
-//      2011-10-07 - initial release
-
-/* ============================================
-I2Cdev device library code is placed under the MIT license
-Copyright (c) 2011 Jeff Rowberg
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-===============================================
-*/
-
-// I2Cdev and MPU6050 must be installed as libraries, or else the .cpp/.h files
-// for both classes must be in the include path of your project
 #include "I2Cdev.h"
 #include "MPU6050.h"
 
@@ -88,6 +54,13 @@ int16_t gx, gy, gz;
 // for a human.
 //#define OUTPUT_BINARY_ACCELGYRO
 
+
+void idle(); //Cube on charge stand, lights off
+void mode11(); //Cube is free from charge stand, lights are on
+void mode12(); //cube is free form charge stand, lights are off
+void mode0();  //Cube on charge stand, lights are on
+
+bool CUBE_FLIPPED = 0;
 
 bool blinkState = false;
 
@@ -149,6 +122,68 @@ void setup() {
 }
 
 void loop() {
+
+state_enum currentState, nextState = IDLE1;
+
+
+
+switch(currentState)
+
+{
+  case IDLE1: if(CHARGING){
+    idle();
+  }
+  else (currentState = MODE11);
+  
+  break;
+
+
+
+  case MODE11: if(!CUBE_FLIPPED && !CHARGING)
+  {
+    mode11();
+  }
+
+  else if(CUBE_FLIPPED){
+    
+  currentState = MODE12;
+  
+  CUBE_FLIPPED = false;
+
+  else if(CHARGING)
+  {
+   currentState = MODE0; 
+  }
+  break;
+
+  
+  case MODE12: if(!CUBE_FLIPPED  && !CHARGING)
+  {
+   mode12(); 
+  }
+  else if(CUBE_FLIPPED){
+
+    CUBE_FLIPPED = false;    
+    currentState = MODE11;
+  }
+  else if(CHARGING)
+  {
+    currentState = IDLE1;
+  }break;
+  
+
+  case MODE0: if(CHARGING)
+  {
+    mode0();
+  }
+  else
+  {
+    currentState = MODE12;
+  }break;
+
+  }
+
+    
     // read raw accel/gyro measurements from device
     //accelgyro.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
@@ -158,10 +193,10 @@ void loop() {
 
 
 
-int LedsPosY  = map(ay, -16000, 16000, 0, 190);
-int LedsPosX = map(ax, -16000, 16000, 0, 190);
-int LedsNegY = map(ay, -16000, 16000, 190, 0);
-int LedsNegX  = map(ax, -16000, 16000, 190, 0);
+int LedsPosY  = map(ay, -16000, 16000, 0, 230);
+int LedsPosX = map(ax, -16000, 16000, 0, 230);
+int LedsNegY = map(ay, -16000, 16000, 230, 0);
+int LedsNegX  = map(ax, -16000, 16000, 230, 0);
 
 
 
@@ -230,8 +265,30 @@ FastLED.show();
 
 }
 
+idle()
+{
+  measure_gyro(false);
+  output_light(false);
+}
+
+mode11()
+{
+  measure_gyro(true);
+  output_light(true);
+}
+
+mode12()
+{
+  measure_gyro(true);
+  output_light(false);
+}
 
 
+mode0()
+{
+  measure_gyro(false);
+  output_light(true);
+}
 
 
 // This example shows several ways to set up and use 'palettes' of colors
