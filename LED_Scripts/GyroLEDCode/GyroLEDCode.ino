@@ -1,27 +1,4 @@
 #include <FastLED.h>
-
-#define LED_PIN     5
-#define NUM_LEDS    12
-#define BRIGHTNESS  255
-#define LED_TYPE    WS2812
-#define COLOR_ORDER GRB
-#define BATTERY_PIN 2 //double check
-CRGB leds[NUM_LEDS];
-
-#define UPDATES_PER_SECOND 100
-
-enum state_enum{IDLE1,MODE11,MODE12,MODE0};
-
-
-CRGBPalette16 currentPalette;
-TBlendType    currentBlending;
-
-extern CRGBPalette16 myRedWhiteBluePalette;
-extern const TProgmemPalette16 myRedWhiteBluePalette_p PROGMEM;
-
-
-
-
 #include "I2Cdev.h"
 #include "MPU6050.h"
 
@@ -34,13 +11,34 @@ extern const TProgmemPalette16 myRedWhiteBluePalette_p PROGMEM;
 // class default I2C address is 0x68
 // specific I2C addresses may be passed as a parameter here
 // AD0 low = 0x68 (default for InvenSense evaluation board)
-// AD0 high = 0x69
+// AD0 high = 0x69s
 MPU6050 accelgyro;
 //MPU6050 accelgyro(0x69); // <-- use for AD0 high
 
+
+#define LED_PIN     5
+#define NUM_LEDS    12
+#define BRIGHTNESS  255
+#define LED_TYPE    WS2812
+#define COLOR_ORDER GRB
+
+CRGB leds[NUM_LEDS];
+
+#define UPDATES_PER_SECOND 100
+
+enum state_enum{IDLE1,MODE11,MODE12,MODE0};
+int CHARGING = 2; //double check
+
+CRGBPalette16 currentPalette;
+TBlendType    currentBlending;
+
+extern CRGBPalette16 myRedWhiteBluePalette;
+extern const TProgmemPalette16 myRedWhiteBluePalette_p PROGMEM;
+
+
 int16_t ax, ay, az;
 int16_t gx, gy, gz;
-
+state_enum currentState = IDLE1;
 
 
 // uncomment "OUTPUT_READABLE_ACCELGYRO" if you want to see a tab-separated
@@ -54,18 +52,23 @@ int16_t gx, gy, gz;
 // for a human.
 //#define OUTPUT_BINARY_ACCELGYRO
 
-
+/*
 void idle(); //Cube on charge stand, lights off
 void mode11(); //Cube is free from charge stand, lights are on
 void mode12(); //cube is free form charge stand, lights are off
 void mode0();  //Cube on charge stand, lights are on
 
-bool CUBE_FLIPPED = 0;
-
+void MeasureGyro(bool gyro_on);
+void OutputLight(bool lights_on);
+*/
+bool CUBE_FLIPPED = false;
 bool blinkState = false;
 
 void setup() {
-
+   
+   Serial.begin(38400);
+    pinMode(CHARGING,INPUT);
+    
     delay( 3000 ); // power-up safety delay
     FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
     FastLED.setBrightness(  BRIGHTNESS );
@@ -85,7 +88,7 @@ void setup() {
     // initialize serial communication
     // (38400 chosen because it works as well at 8MHz as it does at 16MHz, but
     // it's really up to you depending on your project)
-    Serial.begin(38400);
+
 
     // initialize device
     Serial.println("Initializing I2C devices...");
@@ -119,115 +122,61 @@ void setup() {
     
 
     // configure Arduino LED pin for output
+
+
 }
 
 void loop() {
-
-state_enum currentState, nextState = IDLE1;
-
 
 
 switch(currentState)
 
 {
-  case IDLE1: if(CHARGING){
-    idle();
+  case IDLE1: if(digitalRead(CHARGING))
+  { idle(); 
+  Serial.print("S: IDLE1");
   }
-  else (currentState = MODE11);
+  
+  else 
+  {currentState = MODE11; mode11(); 
+  Serial.print("S: MODE11");
+  };
   
   break;
 
-
-
-  case MODE11: if(!CUBE_FLIPPED && !CHARGING)
-  {
-    mode11();
-  }
-
-  else if(CUBE_FLIPPED){
-    
-  currentState = MODE12;
+  case MODE11: if(!CUBE_FLIPPED && !digitalRead(CHARGING)) 
+  {mode11(); Serial.print("S: MODE11");}
   
-  CUBE_FLIPPED = false;
-
-  else if(CHARGING)
-  {
-   currentState = MODE0; 
-  }
+  else if(CUBE_FLIPPED)
+  {CUBE_FLIPPED = false; modeChange(); currentState = MODE12;  mode12(); Serial.print("S: MODE12");}
+  
+  else if(digitalRead(CHARGING))
+  {currentState = MODE0; mode0();Serial.print("S: MODE0");};
   break;
-
   
-  case MODE12: if(!CUBE_FLIPPED  && !CHARGING)
-  {
-   mode12(); 
-  }
-  else if(CUBE_FLIPPED){
-
-    CUBE_FLIPPED = false;    
-    currentState = MODE11;
-  }
-  else if(CHARGING)
-  {
-    currentState = IDLE1;
-  }break;
+  case MODE12: if(!CUBE_FLIPPED  && !digitalRead(CHARGING))
+  {mode12();Serial.print("S: MODE12");}
+  
+  else if(CUBE_FLIPPED)
+  {CUBE_FLIPPED = false; modeChange(); currentState = MODE11; mode11();Serial.print("S: MODE11");}
+  
+  else if(digitalRead(CHARGING))
+  {currentState = IDLE1; idle();Serial.print("S: IDLE1");}
+  break;
   
 
-  case MODE0: if(CHARGING)
-  {
-    mode0();
-  }
+  case MODE0: if(digitalRead(CHARGING))
+  {mode0();Serial.print("S: MODE0");}
   else
-  {
-    currentState = MODE12;
-  }break;
+  {currentState = MODE11;mode11();Serial.print("S: MODE11");}
+  break;
 
   }
 
-    
-    // read raw accel/gyro measurements from device
-    //accelgyro.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
     // these methods (and a few others) are also available
-    accelgyro.getAcceleration(&ax, &ay, &az);
+    //accelgyro.getAcceleration(&ax, &ay, &az);
     //accelgyro.getRotation(&gx, &gy, &gz);
-
-
-
-int LedsPosY  = map(ay, -16000, 16000, 0, 230);
-int LedsPosX = map(ax, -16000, 16000, 0, 230);
-int LedsNegY = map(ay, -16000, 16000, 230, 0);
-int LedsNegX  = map(ax, -16000, 16000, 230, 0);
-
-
-
-Serial.print(LedsPosY); Serial.print("\t");
-Serial.print(LedsPosX); Serial.print("\t");
-Serial.print(LedsNegY); Serial.print("\t");
-Serial.print(LedsNegX); Serial.print("\t");
-
-
-for(int i = 0; i < 2; i++)
-{
- 
-  leds[i] = CRGB::Green;
-   leds[i].subtractFromRGB(LedsPosY);
-}
-for(int i = 2; i < 4; i++)
-{
-  leds[i] = CRGB::Green;
-   leds[i].subtractFromRGB(LedsPosX);
-}
-for(int i = 4; i < 6; i++)
-{
-  leds[i] = CRGB::Green;
-   leds[i].subtractFromRGB(LedsNegY);
-}
-for(int i = 6; i < 8; i++)
-{
-  leds[i] = CRGB::Green;
-   leds[i].subtractFromRGB(LedsNegX);
-}
-FastLED.show();
 
 
         /*// First, clear the existing led values
@@ -241,7 +190,7 @@ FastLED.show();
 
   
 
-    
+   /* 
     #ifdef OUTPUT_READABLE_ACCELGYRO
         // display tab-separated accel/gyro x/y/z values
         Serial.print("a/g:\t");
@@ -261,35 +210,151 @@ FastLED.show();
         Serial.write((uint8_t)(gy >> 8)); Serial.write((uint8_t)(gy & 0xFF));
         Serial.write((uint8_t)(gz >> 8)); Serial.write((uint8_t)(gz & 0xFF));
     #endif
-
+*/
 
 }
 
-idle()
+void idle()
 {
-  measure_gyro(false);
-  output_light(false);
+  MeasureGyro(false);
+  OutputLight(false);
+    return;
 }
 
-mode11()
+void mode11()
 {
-  measure_gyro(true);
-  output_light(true);
+  MeasureGyro(true);
+  OutputLight(true);
+  return;
 }
 
-mode12()
+void mode12()
 {
-  measure_gyro(true);
-  output_light(false);
+  MeasureGyro(true);
+  OutputLight(false);
+  return;
 }
 
 
-mode0()
+void mode0()
 {
-  measure_gyro(false);
-  output_light(true);
+  MeasureGyro(false);
+  OutputLight(true);
+  return;
 }
 
+
+void MeasureGyro(bool gyro_on)
+{
+  
+  if(gyro_on)
+  {
+    // read raw accel/gyro measurements from device
+    accelgyro.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+    if(az < -13000)
+    {
+      CUBE_FLIPPED = true;
+    }
+  }
+  else
+  {
+    return;
+  }
+  
+  
+  
+  return;
+}
+
+
+
+
+
+
+
+
+
+  
+void OutputLight(bool light_on)
+{
+
+  if (light_on)
+  {
+  
+  int LedsPosY  = map(ay, -16000, 16000, 0, 500);
+  int LedsPosX = map(ax, -16000, 16000, 0, 500);
+  int LedsNegY = map(ay, -16000, 16000, 500, 0);
+  int LedsNegX  = map(ax, -16000, 16000, 500, 0);
+
+ // Serial.print(LedsPosY); Serial.print("\t");
+  //      Serial.print(LedsPosX); Serial.print("\t");
+  //      Serial.print(LedsNegY); Serial.print("\t");
+  //       Serial.print(LedsNegX); Serial.print("\t");
+    for(int i = 0; i < 3; i++)
+  {
+   
+    leds[i] = CRGB::Green;
+     leds[i].fadeToBlackBy(LedsPosY);
+       FastLED.show();
+  }
+  for(int i = 3; i < 6; i++)
+  {
+    leds[i] = CRGB::Red;
+     leds[i].fadeToBlackBy(LedsPosX);
+       FastLED.show();
+  }
+  for(int i = 6; i < 9; i++)
+  {
+    leds[i] = CRGB::Blue;
+     leds[i].fadeToBlackBy(LedsNegY);
+       FastLED.show();
+  }
+  for(int i = 9; i < 12; i++)
+  {
+    leds[i] = CRGB::Yellow;
+     leds[i].fadeToBlackBy(LedsNegX);
+       FastLED.show();
+  }
+  }
+  
+  else
+  {
+
+    for (int i=0; i < 12; i++)
+    {
+      leds[i] = CRGB::Black;
+    }
+    FastLED.show();
+    
+  }
+  return;
+}
+
+
+void modeChange()
+{
+  ax = 0;
+  ay = 0;
+  az = 0;
+
+    for (int i = 0; i < 12; i++)
+  {
+    leds[i] = CRGB::Black;
+    FastLED.show();
+  }
+        FastLED.show();
+  for (int i = 0; i < 12; i++)
+  {
+    leds[i] = CRGB::Blue;
+    FastLED.show();
+    delay(100);
+    leds[i] = CRGB::Black;
+    FastLED.show();
+  }
+
+
+}
 
 // This example shows several ways to set up and use 'palettes' of colors
 // with FastLED.
