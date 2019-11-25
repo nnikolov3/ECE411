@@ -22,6 +22,32 @@ MPU6050 accelgyro;
 #define LED_TYPE    WS2812
 #define COLOR_ORDER GRB
 
+
+//Smoothing globals
+
+  const int numReadings = 10;
+  
+  int readingsx[numReadings];      // the readings from the analog input
+  int readingsy[numReadings];      // the readings from the analog input
+  //int readingsz[numReadings];      // the readings from the analog input
+  
+  int readIndex = 0;              // the index of the current reading
+  
+  float totalax = 0;                  // the running total
+  float totalay = 0;                  // the running total
+ // float totalaz = 0;                  // the running total
+  
+  float averageax = 0;                // the average
+  float averageay = 0;                // the average
+ // float averageaz = 0;                // the average
+
+
+  float neg_averageax =0;
+  float neg_averageay =0;
+
+
+
+int LedsPosX = 0;
 CRGB leds[NUM_LEDS];
 
 #define UPDATES_PER_SECOND 100
@@ -102,24 +128,23 @@ void setup() {
     
     Serial.println("Updating internal sensor offsets...");
     // -76  -2359 1688  0 0 0
-    Serial.print(accelgyro.getXAccelOffset()); Serial.print("\t"); // -76
-    Serial.print(accelgyro.getYAccelOffset()); Serial.print("\t"); // -2359
-    Serial.print(accelgyro.getZAccelOffset()); Serial.print("\t"); // 1688
-    Serial.print(accelgyro.getXGyroOffset()); Serial.print("\t"); // 0
-    Serial.print(accelgyro.getYGyroOffset()); Serial.print("\t"); // 0
-    Serial.print(accelgyro.getZGyroOffset()); Serial.print("\t"); // 0
-    Serial.print("\n");
-    accelgyro.setXGyroOffset(220);
-    accelgyro.setYGyroOffset(76);
-    accelgyro.setZGyroOffset(-85);
-    Serial.print(accelgyro.getXAccelOffset()); Serial.print("\t"); // -76
-    Serial.print(accelgyro.getYAccelOffset()); Serial.print("\t"); // -2359
-    Serial.print(accelgyro.getZAccelOffset()); Serial.print("\t"); // 1688
-    Serial.print(accelgyro.getXGyroOffset()); Serial.print("\t"); // 0
-    Serial.print(accelgyro.getYGyroOffset()); Serial.print("\t"); // 0
-    Serial.print(accelgyro.getZGyroOffset()); Serial.print("\t"); // 0
-    Serial.print("\n");
+   
     
+    accelgyro.setXAccelOffset(46);
+    accelgyro.setYAccelOffset(-981);
+    accelgyro.setZAccelOffset(1342);
+    accelgyro.setXGyroOffset(51);
+    accelgyro.setYGyroOffset(-12);
+    accelgyro.setZGyroOffset(-5);
+  /*
+    Serial.print(accelgyro.getXAccelOffset()); Serial.print("\t"); // -76
+    Serial.print(accelgyro.getYAccelOffset()); Serial.print("\t"); // -2359
+    Serial.print(accelgyro.getZAccelOffset()); Serial.print("\t"); // 1688
+    Serial.print(accelgyro.getXGyroOffset()); Serial.print("\t"); // 0
+    Serial.print(accelgyro.getYGyroOffset()); Serial.print("\t"); // 0
+    Serial.print(accelgyro.getZGyroOffset()); Serial.print("\t"); // 0
+    Serial.print("\n");
+    */
 
     // configure Arduino LED pin for output
 
@@ -145,30 +170,30 @@ switch(currentState)
   break;
 
   case MODE11: if(!CUBE_FLIPPED && !digitalRead(CHARGING)) 
-  {mode11(); Serial.print("S: MODE11");}
+  {mode11(); Serial.print("S: Disconnected from Charger, lights on \n");}
   
   else if(CUBE_FLIPPED)
   {CUBE_FLIPPED = false; modeChange(); currentState = MODE12;  mode12(); Serial.print("S: MODE12");}
   
   else if(digitalRead(CHARGING))
-  {currentState = MODE0; mode0();Serial.print("S: MODE0");};
+  {currentState = MODE0; mode0();Serial.print("S: Charging, lights on \n");};
   break;
   
   case MODE12: if(!CUBE_FLIPPED  && !digitalRead(CHARGING))
-  {mode12();Serial.print("S: MODE12");}
+  {mode12();Serial.print("S: Disconnected from Charger, lights off \n");}
   
   else if(CUBE_FLIPPED)
-  {CUBE_FLIPPED = false; modeChange(); currentState = MODE11; mode11();Serial.print("S: MODE11");}
+  {CUBE_FLIPPED = false; modeChange(); currentState = MODE11; mode11();Serial.print("S: Disconnected from charger, lighhts on (2) \n");}
   
   else if(digitalRead(CHARGING))
-  {currentState = IDLE1; idle();Serial.print("S: IDLE1");}
+  {currentState = IDLE1; idle();Serial.print("S: Charging, lights off\n");}
   break;
   
 
   case MODE0: if(digitalRead(CHARGING))
-  {mode0();Serial.print("S: MODE0");}
+  {mode0();Serial.print("Charging, lights on (2) \n");}
   else
-  {currentState = MODE11;mode11();Serial.print("S: MODE11");}
+  {currentState = MODE11;mode11();Serial.print("S: Disconnected from charger, lighhts on (3)\n");}
   break;
 
   }
@@ -190,16 +215,16 @@ switch(currentState)
 
   
 
-   /* 
+   
     #ifdef OUTPUT_READABLE_ACCELGYRO
         // display tab-separated accel/gyro x/y/z values
         Serial.print("a/g:\t");
         Serial.print(ax); Serial.print("\t");
-        Serial.print(ay); Serial.print("\t");
-        Serial.print(az); Serial.print("\t");
-        Serial.print(gx); Serial.print("\t");
-        Serial.print(gy); Serial.print("\t");
-        Serial.println(gz);
+       // Serial.print(ay); Serial.print("\t");
+       // Serial.print(az); Serial.print("\t");
+       // Serial.print(gx); Serial.print("\t");
+       // Serial.print(gy); Serial.print("\t");
+       // Serial.println(gz);
     #endif
 
     #ifdef OUTPUT_BINARY_ACCELGYRO
@@ -210,7 +235,6 @@ switch(currentState)
         Serial.write((uint8_t)(gy >> 8)); Serial.write((uint8_t)(gy & 0xFF));
         Serial.write((uint8_t)(gz >> 8)); Serial.write((uint8_t)(gz & 0xFF));
     #endif
-*/
 
 }
 
@@ -246,13 +270,42 @@ void mode0()
 
 void MeasureGyro(bool gyro_on)
 {
+
+
+
   
   if(gyro_on)
   {
     // read raw accel/gyro measurements from device
+    
+    totalax = totalax - readingsx[readIndex];
+    totalay = totalay - readingsy[readIndex];
+    //totalaz = totalaz - readingsz[readIndex];
+    
     accelgyro.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+    readingsx[readIndex] = ax;
+    readingsy[readIndex] = ay;
+   // readingsz[readIndex] = az;
+    
+    totalax = totalax + readingsx[readIndex];
+    totalay = totalay + readingsy[readIndex];
+    //totalaz = totalaz + readingsz[readIndex];
+    
+    readIndex=readIndex+1;
 
-    if(az < -13000)
+    if(readIndex >= numReadings) { readIndex = 0;}
+    
+    averageax = totalax/numReadings;
+    averageay = totalay/numReadings;
+   // averageaz = totalaz/numReadings;
+    
+    Serial.print("Average: ");
+    Serial.print(averageax);
+    
+
+    
+
+    if(az < -15000)
     {
       CUBE_FLIPPED = true;
     }
@@ -273,64 +326,114 @@ void MeasureGyro(bool gyro_on)
 
 
 
-
-
   
 void OutputLight(bool light_on)
 {
 
-  if (light_on)
-  {
-  
-  int LedsPosY  = map(ay, -16000, 16000, 0, 500);
-  int LedsPosX = map(ax, -16000, 16000, 0, 500);
-  int LedsNegY = map(ay, -16000, 16000, 500, 0);
-  int LedsNegX  = map(ax, -16000, 16000, 500, 0);
 
- // Serial.print(LedsPosY); Serial.print("\t");
-  //      Serial.print(LedsPosX); Serial.print("\t");
-  //      Serial.print(LedsNegY); Serial.print("\t");
-  //       Serial.print(LedsNegX); Serial.print("\t");
-    for(int i = 0; i < 3; i++)
-  {
-   
-    leds[i] = CRGB::Green;
-     leds[i].fadeToBlackBy(LedsPosY);
-       FastLED.show();
-  }
-  for(int i = 3; i < 6; i++)
-  {
-    leds[i] = CRGB::Red;
-     leds[i].fadeToBlackBy(LedsPosX);
-       FastLED.show();
-  }
-  for(int i = 6; i < 9; i++)
-  {
-    leds[i] = CRGB::Blue;
-     leds[i].fadeToBlackBy(LedsNegY);
-       FastLED.show();
-  }
-  for(int i = 9; i < 12; i++)
-  {
-    leds[i] = CRGB::Yellow;
-     leds[i].fadeToBlackBy(LedsNegX);
-       FastLED.show();
-  }
-  }
+//Modify how strongly the lights responds to movement
+const float Sensitivity = 3;
   
-  else
-  {
+ if (light_on)
+  
+      {
+        
+          ChangePalettePeriodically();
+    
+    static uint8_t startIndex = 0;
+    startIndex = startIndex + 1; /* motion speed */
+    
+    FillLEDsFromPaletteColors( startIndex);
+    
+    FastLED.show();
+    FastLED.delay(1000 / UPDATES_PER_SECOND);
+        
+        
+        
+        /*
+        
+            if (averageax < 0)
+              {
+                neg_averageax = -averageax;
+                averageax = 0;
+              }
+        
+             if (averageay < 0)
+             {
+              neg_averageay = -averageay;
+              averageay = 0;
+             }
+  
+  int LedsPosY  = map(averageay, 0, 16200, 0, 255);
+  int LedsPosX = map(averageax, 0, 16200, 0, 255);
+  int LedsNegY = map(neg_averageay, 0, 16200, 0, 255);
+  int LedsNegX  = map(neg_averageax, 0, 16200, 0, 255);
 
+  LedsPosY = LedsPosY*Sensitivity;
+  LedsPosX = LedsPosX*Sensitivity;
+  LedsNegY = LedsNegY*Sensitivity;
+  LedsNegX = LedsNegX*Sensitivity;
+  
+//limit output to prevent overflow brightness
+  if (LedsPosY > 255)
+    LedsPosY = 255;
+    
+    if (LedsPosX > 255)
+    LedsPosX = 255;
+    
+    if (LedsNegY > 255)
+    LedsNegY = 255;
+    
+    if (LedsNegX > 255)
+    LedsNegX = 255;
+
+        Serial.print("\t");
+        Serial.print(LedsPosY); Serial.print("\t");
+        Serial.print(LedsPosX); Serial.print("\t");
+        Serial.print(LedsNegY); Serial.print("\t");
+        Serial.print(LedsNegX); Serial.print("\t");
+
+      int ledintensity[12] = {0};
+
+
+      ledintensity[0] = .5*LedsPosX + .5*LedsPosY;
+      ledintensity[1] = .5*LedsPosX + .35*LedsPosY;
+      ledintensity[2] = .5*LedsPosX + .35*LedsNegY;
+      ledintensity[3] = .5*LedsPosX + .5*LedsNegY;
+      ledintensity[4] = .5*LedsNegY + .35*LedsPosY;
+      ledintensity[5] = .5*LedsNegY + .35*LedsNegX;
+      ledintensity[6] = .5*LedsNegY + .5*LedsNegX;
+      ledintensity[7] = .5*LedsNegX + .35*LedsNegY;
+      ledintensity[8] = .5*LedsNegX + .35*LedsPosY;
+      ledintensity[9] = .5*LedsNegX + .5*LedsPosY;
+      ledintensity[10] = .5*LedsPosY + .35*LedsNegX;
+      ledintensity[11] = .5*LedsPosY + .35*LedsPosX;
+
+      
+for (int i = 0; i < 12; i++)
+      {
+        leds[i] = CRGB::White;
+        leds[i] -= CRGB(0, ledintensity[i], ledintensity[i]);
+        leds[i] += CRGB(ledintensity[i], 0, 0);
+        }
+        FastLED.show();*/
+ }
+
+
+ 
+ 
+  else{
     for (int i=0; i < 12; i++)
     {
       leds[i] = CRGB::Black;
+      
     }
     FastLED.show();
-    
   }
+  
   return;
-}
 
+}
 
 void modeChange()
 {
@@ -348,10 +451,11 @@ void modeChange()
   {
     leds[i] = CRGB::Blue;
     FastLED.show();
-    delay(100);
+    delay(200);
     leds[i] = CRGB::Black;
     FastLED.show();
   }
+  
 
 
 }
@@ -375,7 +479,7 @@ void modeChange()
 
 
 
-/*
+
 void FillLEDsFromPaletteColors( uint8_t colorIndex)
 {
     uint8_t brightness = 255;
@@ -384,7 +488,7 @@ void FillLEDsFromPaletteColors( uint8_t colorIndex)
         leds[i] = ColorFromPalette( currentPalette, colorIndex, brightness, currentBlending);
         colorIndex += 3;
     }
-}*/
+}
 
 
 // There are several different palettes of colors demonstrated here.
@@ -394,7 +498,7 @@ void FillLEDsFromPaletteColors( uint8_t colorIndex)
 //
 // Additionally, you can manually define your own color palettes, or you can write
 // code that creates color palettes on the fly.  All are shown here.
-/*
+
 void ChangePalettePeriodically()
 {
     uint8_t secondHand = (millis() / 1000) % 60;
@@ -415,7 +519,7 @@ void ChangePalettePeriodically()
         if( secondHand == 55)  { currentPalette = myRedWhiteBluePalette_p; currentBlending = LINEARBLEND; }
     }
 }
-*/
+
 // This function fills the palette with totally random colors.
 void SetupTotallyRandomPalette()
 {
