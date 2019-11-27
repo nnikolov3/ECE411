@@ -38,23 +38,11 @@ MPU6050 accelgyro;
   //int readingsz[numReadings];      // the readings from the analog input
   
 
-  
-  float totalax = 0;                  // the running total
-  float totalay = 0;                  // the running total
- //float totalaz = 0;                  // the running total
-  
-  float averageax = 0;                // the average
-  float averageay = 0;                // the average
- //float averageaz = 0;                // the average
- 
-  float neg_averageax =0;
-  float neg_averageay =0;
 
-  unsigned long azTime = 0;
-  unsigned long axTime = 0;
-  unsigned long ayTime = 0;
-  unsigned long axxTime = 0;
-
+int axcounter = 0;
+int axxcounter = 0;
+int aycounter = 0;
+int ayycounter = 0;
 
   // MPU control/status vars
 bool dmpReady = false;  // set true if DMP init was successful
@@ -100,9 +88,6 @@ bool RIGHT_ON = false;
 
 // the following variables are unsigned longs because the time, measured in
 // milliseconds, will quickly become a bigger number than can be stored in an int.
-unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
-unsigned long debounceDelay = 50;
-
 
 // ================================================================
 // ===               INTERRUPT DETECTION ROUTINE                ===
@@ -116,7 +101,7 @@ void dmpDataReady() {
 
 void setup() {
    
-   Serial.begin(38400);
+   Serial.begin(115200);
     pinMode(CHARGING,INPUT);
     pinMode(INTERRUPT_PIN, INPUT);
     delay( 3000 ); // power-up safety delay
@@ -196,7 +181,11 @@ void loop() {
         if (mpuInterrupt && fifoCount < packetSize) {
           // try to get out of the infinite loop 
           fifoCount = accelgyro.getFIFOCount();
-      switch(currentState)
+          
+///////////////////////////////////////////////////////////////////////////////
+//                  STATE MACHINE 
+///////////////////////////////////////////////////////////////////////////////
+switch(currentState)
 
 {
   case IDLE1: if(deboCharging())
@@ -268,7 +257,7 @@ void loop() {
             accelgyro.dmpGetGravity(&gravity, &r);
             accelgyro.dmpGetYawPitchRoll(ypr, &r, &gravity); 
             }
-}
+}  //end of loop()
 
 
 int deboCharging()
@@ -315,35 +304,14 @@ void mode0()
 void MeasureGyro(bool gyro_on)
 {
 
+
   if(gyro_on)
   {
-    if (!LEFT_ON){
-      totalax = totalax - readingsx[readIndex];
-      totalay = totalay - readingsy[readIndex];
-      //totalaz = totalaz - readingsz[readIndex];
-      
-      accelgyro.getAcceleration(&ax, &ay, &az);
-      readingsx[readIndex] = ax;
-      readingsy[readIndex] = ay;
-     // readingsz[readIndex] = az; 
-      
-      totalax = totalax + readingsx[readIndex];
-      totalay = totalay + readingsy[readIndex];
-      //totalaz = totalaz + readingsz[readIndex];
-      
-      readIndex=readIndex+1;
-  
-      if(readIndex >= numReadings) { readIndex = 0;}
-      
-      averageax = totalax/numReadings;
-      averageay = totalay/numReadings;
-     //averageaz = totalaz/numReadings;
-
-           Serial.print("\t");
-        Serial.print(az); Serial.print("\t");
-        Serial.print(averageax); Serial.print("\t");
-        Serial.print(averageay); Serial.print("\t");
-    }
+      Serial.print("\t");
+        Serial.print(ypr[0]*(180/M_PI)); Serial.print("\t");
+        Serial.print(ypr[1]*(180/M_PI)); Serial.print("\t");
+        Serial.print(ypr[2]*(180/M_PI)); Serial.print("\t");
+    /*
         if(az < -16000)
         {
           if ((millis() - azTime) > 1000)
@@ -353,48 +321,92 @@ void MeasureGyro(bool gyro_on)
         }
          azTime = millis();
         }
-        
-        if (averageax > 15000)
+        */
+        if (ypr[1] > 1.4)
         {
-           if ((millis() - axTime) > 1000)
+              axcounter = axcounter + 1;
+        }
+        else
+          axcounter = 0;
+         if (axcounter > 50)
             {
-              if (averageax > 15000)
+              modeChange();
               LEFT_ON = true;
               RIGHT_ON = false;
+              axcounter = 0;
+              axxcounter = 0;
+              ayycounter = 0;
+              aycounter = 0;
             }
-              axTime = millis(); 
-        }
+            
 
-        
-
-        if (averageax < -15000)
+        if (ypr[1] < -1.4)
         {
-           if ((millis() - axxTime) > 1000)
+              axxcounter = axxcounter + 1;
+        }
+        else
+          axxcounter = 0;
+         if (axxcounter > 50)
             {
-              if (averageax < -15000)
-              RIGHT_ON = true;
+              modeChange();
               LEFT_ON = false;
+              RIGHT_ON = true;
+              axcounter = 0;
+              axxcounter = 0;
+              ayycounter = 0;
+              aycounter = 0;
             }
-              axxTime = millis(); 
-        }
+            
 
-      if (averageay > 15000)
+        if (ypr[2] > 1.4)
         {
-           if ((millis() - ayTime) > 1000)
+              aycounter = aycounter + 1;
+        }
+        else
+          aycounter = 0;
+         if (aycounter > 50)
             {
-              if (averageay > 15000)
+              modeChange();
               LEFT_ON = false;
               RIGHT_ON = false;
+              axcounter = 0;
+              axxcounter = 0;
+              ayycounter = 0;
+              aycounter = 0;
             }
-              ayTime = millis(); 
+
+
+      if (ypr[2] < -1.4)
+        {
+              ayycounter = ayycounter + 1;
+        }
+        else
+          ayycounter = 0;
+         if (ayycounter > 50)
+            {
+              modeChange();
+              LEFT_ON = true;
+              RIGHT_ON = true;
+              axcounter = 0;
+              axxcounter = 0;
+              ayycounter = 0;
+              aycounter = 0;
+            }
         }
         
-  }
-  
-   else
+    else
    {
      return;
    }
+
+
+         Serial.print("axcounter:    ");
+         Serial.print(axcounter);
+         Serial.print("\t");
+         Serial.print("aycounter:    ");
+         Serial.print(aycounter);
+        Serial.print("\t");
+
    
   return;
 }
@@ -406,21 +418,23 @@ void OutputLight(bool light_on)
     if (light_on)
     
         {
-          if (LEFT_ON)
+          if (LEFT_ON&&RIGHT_ON)
           {
-            RotationLedsON();
-            return;
+            WarmGlowLedsON();
+          }
+          else if (LEFT_ON)
+          {
+             RotationLedsON();
           }
           
           else if (RIGHT_ON)
           {
-            RaindowsLedsON();
-            return;
+            OffLedsON();
           }
+
           else
           {
           DefaultLedsON();
-          return;
           }
         }
         
@@ -436,46 +450,52 @@ void OutputLight(bool light_on)
 
 void modeChange()
 {
-  ax = 0;
-  ay = 0;
-  az = 0;
-
     for (int i = 0; i < 12; i++)
   {
     leds[i] = CRGB::Black;
-    FastLED.show();
   }
         FastLED.show();
   for (int i = 0; i < 12; i++)
   {
-    leds[i] = CRGB::Blue;
-    FastLED.show();
-    delay(200);
+    leds[i] = CRGB::Green;
+   FastLED.show();
+    delay(100);
     leds[i] = CRGB::Black;
-    FastLED.show();
+   FastLED.show();   
   }
+
+  return;
 }
 
 
 void DefaultLedsON()
 {
-            if (averageax < 0)
+  float n_ypr[3] = {0};
+            // get rid of negative numbers to make mapping work
+            if (ypr[1] < 0)
               {
-                neg_averageax = -averageax;
-                averageax = 0;
+                n_ypr[1] = -ypr[1];
+                ypr[1] = 0;
               }
               
-             if (averageay < 0)
+             if (ypr[2] < 0)
              {
-              neg_averageay = -averageay;
-              averageay = 0;
+              n_ypr[2] = -ypr[2];
+              ypr[2] = 0;
              }
-  
-  int LedsPosY  = map(averageay, 0, 16300, 0, 255);
-  int LedsPosX = map(averageax, 0, 16300, 0, 255);
-  int LedsNegY = map(neg_averageay, 0, 16300, 0, 255);
-  int LedsNegX  = map(neg_averageax, 0, 16300, 0, 255);
 
+        
+//map each side to color intensity
+  int LedsPosY  = map(ypr[2]*(180/M_PI), 0, 70, 0, 255);
+  int LedsPosX = map(ypr[1]*(180/M_PI), 0, 70, 0, 255);
+  int LedsNegY = map(n_ypr[2]*(180/M_PI), 0, 70, 0, 255);
+  int LedsNegX  = map(n_ypr[1]*(180/M_PI), 0, 70, 0, 255);
+
+        Serial.print("\t");
+        Serial.print(LedsPosY); Serial.print("\t");
+        Serial.print(LedsPosX); Serial.print("\t");
+        Serial.print(LedsNegY); Serial.print("\t");
+        Serial.print( LedsNegX); Serial.print("\t");
   LedsPosY = LedsPosY*Sensitivity;
   LedsPosX = LedsPosX*Sensitivity;
   LedsNegY = LedsNegY*Sensitivity;
@@ -498,7 +518,7 @@ void DefaultLedsON()
 
       int ledintensity[12] = {0};
 
-
+//map sides to colors, and in some colors on the corners aswell
       ledintensity[0] = LedsPosX + LedsPosY;
       ledintensity[1] = LedsPosX + .1*LedsPosY;
       ledintensity[2] = LedsPosX + .1*LedsNegY;
@@ -512,6 +532,8 @@ void DefaultLedsON()
       ledintensity[10] = LedsPosY + .1*LedsNegX;
       ledintensity[11] = LedsPosY + .1*LedsPosX;
 
+
+
 for (int i = 0; i < 12; i++)
       {
         if (ledintensity[i] > 255)
@@ -521,7 +543,6 @@ for (int i = 0; i < 12; i++)
         leds[i] += CRGB(ledintensity[i], 0, 0);
         }
         FastLED.show();
-
         return;
 }
 
@@ -542,7 +563,7 @@ void RotationLedsON()
 
 
 
-
+//led light rotation from FASTLED library
 void RaindowsLedsON()
 {
           ChangePalettePeriodically();
@@ -570,6 +591,25 @@ void FillLEDsFromPaletteColors( uint8_t colorIndex)
     }
 }
 
+
+void OffLedsON()
+{
+  
+  for (int i = 0; i < 12; i++)
+  {
+    leds[i] = CRGB::Black;
+  }
+}
+
+void WarmGlowLedsON()
+{
+  
+  for (int i = 0; i < 12; i++)
+  {
+    leds[i] = CRGB(255,255,100);
+    FastLED.show();
+  }
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //FASTLED PATTERNS
@@ -661,6 +701,9 @@ const TProgmemPalette16 myRedWhiteBluePalette_p PROGMEM =
     CRGB::Black
 };
 
+
+
+//roation logic
 CRGB ledpick(int i)
 {
   int j = 11 - i;
