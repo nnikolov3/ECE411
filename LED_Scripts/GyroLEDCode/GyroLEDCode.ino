@@ -1,6 +1,7 @@
 #include <FastLED.h>
 #include "I2Cdev.h"
-#include "MPU6050.h"
+//#include "MPU6050.h"
+#include "MPU6050_6Axis_MotionApps20.h"
 
 // Arduino Wire library is required if I2Cdev I2CDEV_ARDUINO_WIRE implementation
 // is used in I2Cdev.h
@@ -15,45 +16,70 @@
 MPU6050 accelgyro;
 //MPU6050 accelgyro(0x69); // <-- use for AD0 high
 
+#define OUTPUT_READABLE_YAWPITCHROLL
 
 #define LED_PIN     5
 #define NUM_LEDS    12
 #define BRIGHTNESS  255
 #define LED_TYPE    WS2812
 #define COLOR_ORDER GRB
+#define INTERRUPT_PIN 3
+#define CHARGING 2
+
 
 
 //Smoothing globals
-
+  const float Sensitivity = 2;
   const int numReadings = 10;
+  int readIndex = 0;              // the index of the current reading
   
   int readingsx[numReadings];      // the readings from the analog input
   int readingsy[numReadings];      // the readings from the analog input
   //int readingsz[numReadings];      // the readings from the analog input
   
-  int readIndex = 0;              // the index of the current reading
+
   
   float totalax = 0;                  // the running total
   float totalay = 0;                  // the running total
- // float totalaz = 0;                  // the running total
+ //float totalaz = 0;                  // the running total
   
   float averageax = 0;                // the average
   float averageay = 0;                // the average
- // float averageaz = 0;                // the average
-
-
+ //float averageaz = 0;                // the average
+ 
   float neg_averageax =0;
   float neg_averageay =0;
 
+  unsigned long azTime = 0;
+  unsigned long axTime = 0;
+  unsigned long ayTime = 0;
+  unsigned long axxTime = 0;
 
 
-int LedsPosX = 0;
+  // MPU control/status vars
+bool dmpReady = false;  // set true if DMP init was successful
+uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
+uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
+uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
+uint16_t fifoCount;     // count of all bytes currently in FIFO
+uint8_t fifoBuffer[64]; // FIFO storage buffer
+
+
+// orientation/motion vars
+Quaternion r;           // [w, x, y, z]         quaternion container
+VectorInt16 aa;         // [x, y, z]            accel sensor measurements
+VectorFloat gravity;    // [x, y, z]            gravity vector
+float euler[3];         // [psi, theta, phi]    Euler angle container
+float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
+ 
+
+//Modify how strongly the lights responds to movement
 CRGB leds[NUM_LEDS];
 
 #define UPDATES_PER_SECOND 100
 
 enum state_enum{IDLE1,MODE11,MODE12,MODE0};
-int CHARGING = 2; //double check
+
 
 CRGBPalette16 currentPalette;
 TBlendType    currentBlending;
@@ -61,103 +87,119 @@ TBlendType    currentBlending;
 extern CRGBPalette16 myRedWhiteBluePalette;
 extern const TProgmemPalette16 myRedWhiteBluePalette_p PROGMEM;
 
-
 int16_t ax, ay, az;
 int16_t gx, gy, gz;
+
 state_enum currentState = IDLE1;
 
 
-// uncomment "OUTPUT_READABLE_ACCELGYRO" if you want to see a tab-separated
-// list of the accel X/Y/Z and then gyro X/Y/Z values in decimal. Easy to read,
-// not so easy to parse, and slow(er) over UART.
-#define OUTPUT_READABLE_ACCELGYRO
-
-// uncomment "OUTPUT_BINARY_ACCELGYRO" to send all 6 axes of data as 16-bit
-// binary, one right after the other. This is very fast (as fast as possible
-// without compression or data loss), and easy to parse, but impossible to read
-// for a human.
-//#define OUTPUT_BINARY_ACCELGYRO
-
-/*
-void idle(); //Cube on charge stand, lights off
-void mode11(); //Cube is free from charge stand, lights are on
-void mode12(); //cube is free form charge stand, lights are off
-void mode0();  //Cube on charge stand, lights are on
-
-void MeasureGyro(bool gyro_on);
-void OutputLight(bool lights_on);
-*/
 bool CUBE_FLIPPED = false;
 bool blinkState = false;
+bool LEFT_ON = false;
+bool RIGHT_ON = false;
+
+// the following variables are unsigned longs because the time, measured in
+// milliseconds, will quickly become a bigger number than can be stored in an int.
+unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
+unsigned long debounceDelay = 50;
+
+
+// ================================================================
+// ===               INTERRUPT DETECTION ROUTINE                ===
+// ================================================================
+
+volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
+void dmpDataReady() {
+    mpuInterrupt = true;
+}
+
 
 void setup() {
    
    Serial.begin(38400);
     pinMode(CHARGING,INPUT);
-    
+    pinMode(INTERRUPT_PIN, INPUT);
     delay( 3000 ); // power-up safety delay
     FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
     FastLED.setBrightness(  BRIGHTNESS );
     
     currentPalette = RainbowColors_p;
     currentBlending = LINEARBLEND;
-
-
-  
-    // join I2C bus (I2Cdev library doesn't do this automatically)
-    #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
         Wire.begin();
-    #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
-        Fastwire::setup(400, true);
-    #endif
-
-    // initialize serial communication
-    // (38400 chosen because it works as well at 8MHz as it does at 16MHz, but
-    // it's really up to you depending on your project)
+        Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
 
 
-    // initialize device
-    Serial.println("Initializing I2C devices...");
+  Serial.println("Initializing I2C devices...");
     accelgyro.initialize();
 
     // verify connection
     Serial.println("Testing device connections...");
     Serial.println(accelgyro.testConnection() ? "MPU6050 connection successful" : "MPU6050 connection failed");
+        
+
+    while (Serial.available() && Serial.read()); // empty buffer
+    
+    devStatus = accelgyro.dmpInitialize();
+    // initialize device
+
 
     // use the code below to change accel/gyro offset values
-    
     Serial.println("Updating internal sensor offsets...");
-    // -76  -2359 1688  0 0 0
-   
-    
     accelgyro.setXAccelOffset(46);
     accelgyro.setYAccelOffset(-981);
     accelgyro.setZAccelOffset(1342);
     accelgyro.setXGyroOffset(51);
     accelgyro.setYGyroOffset(-12);
     accelgyro.setZGyroOffset(-5);
-  /*
-    Serial.print(accelgyro.getXAccelOffset()); Serial.print("\t"); // -76
-    Serial.print(accelgyro.getYAccelOffset()); Serial.print("\t"); // -2359
-    Serial.print(accelgyro.getZAccelOffset()); Serial.print("\t"); // 1688
-    Serial.print(accelgyro.getXGyroOffset()); Serial.print("\t"); // 0
-    Serial.print(accelgyro.getYGyroOffset()); Serial.print("\t"); // 0
-    Serial.print(accelgyro.getZGyroOffset()); Serial.print("\t"); // 0
-    Serial.print("\n");
-    */
 
-    // configure Arduino LED pin for output
+ // make sure it worked (returns 0 if so)
+    if (devStatus == 0) {
+        // Calibration Time: generate offsets and calibrate our MPU6050
+        accelgyro.CalibrateAccel(6);
+        accelgyro.CalibrateGyro(6);
+        accelgyro.PrintActiveOffsets();
+        // turn on the DMP, now that it's ready
+        Serial.println(F("Enabling DMP..."));
+        accelgyro.setDMPEnabled(true);
 
+        // enable Arduino interrupt detection
+        Serial.print(F("Enabling interrupt detection (Arduino external interrupt "));
+        Serial.print(digitalPinToInterrupt(INTERRUPT_PIN));
+        Serial.println(F(")..."));
+        attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
+        mpuIntStatus = accelgyro.getIntStatus();
 
+        // set our DMP Ready flag so the main loop() function knows it's okay to use it
+        Serial.println(F("DMP ready! Waiting for first interrupt..."));
+        dmpReady = true;
+
+        // get expected DMP packet size for later comparison
+        packetSize = accelgyro.dmpGetFIFOPacketSize();
+    } else {
+        // ERROR!
+        // 1 = initial memory load failed
+        // 2 = DMP configuration updates failed
+        // (if it's going to break, usually the code will be 1)
+        Serial.print(F("DMP Initialization failed (code "));
+        Serial.print(devStatus);
+        Serial.println(F(")"));
+    }
 }
 
 void loop() {
 
+   
+      if (!dmpReady) return;
 
-switch(currentState)
+  // wait for MPU interrupt or extra packet(s) available
+    while (!mpuInterrupt && fifoCount < packetSize) {
+        if (mpuInterrupt && fifoCount < packetSize) {
+          // try to get out of the infinite loop 
+          fifoCount = accelgyro.getFIFOCount();
+      switch(currentState)
 
 {
-  case IDLE1: if(digitalRead(CHARGING))
+  case IDLE1: if(deboCharging())
   { idle(); 
   Serial.print("S: IDLE1");
   }
@@ -166,273 +208,230 @@ switch(currentState)
   {currentState = MODE11; mode11(); 
   Serial.print("S: MODE11");
   };
-  
   break;
-
-  case MODE11: if(!CUBE_FLIPPED && !digitalRead(CHARGING)) 
+  case MODE11: if(!CUBE_FLIPPED && !deboCharging()) 
   {mode11(); Serial.print("S: Disconnected from Charger, lights on \n");}
   
   else if(CUBE_FLIPPED)
   {CUBE_FLIPPED = false; modeChange(); currentState = MODE12;  mode12(); Serial.print("S: MODE12");}
   
-  else if(digitalRead(CHARGING))
+  else if(deboCharging())
   {currentState = MODE0; mode0();Serial.print("S: Charging, lights on \n");};
   break;
   
-  case MODE12: if(!CUBE_FLIPPED  && !digitalRead(CHARGING))
+  case MODE12: if(!CUBE_FLIPPED  && !deboCharging())
   {mode12();Serial.print("S: Disconnected from Charger, lights off \n");}
   
   else if(CUBE_FLIPPED)
   {CUBE_FLIPPED = false; modeChange(); currentState = MODE11; mode11();Serial.print("S: Disconnected from charger, lighhts on (2) \n");}
   
-  else if(digitalRead(CHARGING))
+  else if(deboCharging())
   {currentState = IDLE1; idle();Serial.print("S: Charging, lights off\n");}
   break;
-  
-
-  case MODE0: if(digitalRead(CHARGING))
+  case MODE0: if(deboCharging())
   {mode0();Serial.print("Charging, lights on (2) \n");}
   else
   {currentState = MODE11;mode11();Serial.print("S: Disconnected from charger, lighhts on (3)\n");}
   break;
-
-  }
-
-
-    // these methods (and a few others) are also available
-    //accelgyro.getAcceleration(&ax, &ay, &az);
-    //accelgyro.getRotation(&gx, &gy, &gz);
-
-
-        /*// First, clear the existing led values
-        FastLED.clear();
-        for(int led = 0; led < 9; led++) { 
-            //leds[led] = CRGB::Red; 
-            leds[led].setRGB(0,ColorMapToAX,ColorMapToAY);
+  } // end switch state;
         }
-        FastLED.show();
-    */
+    }  
 
-  
+    // reset interrupt flag and get INT_STATUS byte
+    mpuInterrupt = false;
+    mpuIntStatus = accelgyro.getIntStatus();
 
-   
-    #ifdef OUTPUT_READABLE_ACCELGYRO
-        // display tab-separated accel/gyro x/y/z values
-        Serial.print("a/g:\t");
-        Serial.print(ax); Serial.print("\t");
-       // Serial.print(ay); Serial.print("\t");
-       // Serial.print(az); Serial.print("\t");
-       // Serial.print(gx); Serial.print("\t");
-       // Serial.print(gy); Serial.print("\t");
-       // Serial.println(gz);
-    #endif
+    // get current FIFO count
+    fifoCount = accelgyro.getFIFOCount();
+   if(fifoCount < packetSize){
+          //Lets go back and wait for another interrupt. We shouldn't be here, we got an interrupt from another event
+      // This is blocking so don't do it   while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
+    }
+    // check for overflow (this should never happen unless our code is too inefficient)
+    else if ((mpuIntStatus & _BV(MPU6050_INTERRUPT_FIFO_OFLOW_BIT)) || fifoCount >= 1024) {
+        // reset so we can continue cleanly
+        accelgyro.resetFIFO();
+      //  fifoCount = mpu.getFIFOCount();  // will be zero after reset no need to ask
+        Serial.println(F("FIFO overflow!"));
 
-    #ifdef OUTPUT_BINARY_ACCELGYRO
-        Serial.write((uint8_t)(ax >> 8)); Serial.write((uint8_t)(ax & 0xFF));
-        Serial.write((uint8_t)(ay >> 8)); Serial.write((uint8_t)(ay & 0xFF));
-        Serial.write((uint8_t)(az >> 8)); Serial.write((uint8_t)(az & 0xFF));
-        Serial.write((uint8_t)(gx >> 8)); Serial.write((uint8_t)(gx & 0xFF));
-        Serial.write((uint8_t)(gy >> 8)); Serial.write((uint8_t)(gy & 0xFF));
-        Serial.write((uint8_t)(gz >> 8)); Serial.write((uint8_t)(gz & 0xFF));
-    #endif
+    // otherwise, check for DMP data ready interrupt (this should happen frequently)
+    } else if (mpuIntStatus & _BV(MPU6050_INTERRUPT_DMP_INT_BIT)) {
 
+        // read a packet from FIFO
+    while(fifoCount >= packetSize){ // Lets catch up to NOW, someone is using the dreaded delay()!
+      accelgyro.getFIFOBytes(fifoBuffer, packetSize);
+      // track FIFO count here in case there is > 1 packet available
+      // (this lets us immediately read more without waiting for an interrupt)
+      fifoCount -= packetSize;
+    }
+            accelgyro.dmpGetQuaternion(&r, fifoBuffer);
+            accelgyro.dmpGetGravity(&gravity, &r);
+            accelgyro.dmpGetYawPitchRoll(ypr, &r, &gravity); 
+            }
+}
+
+
+int deboCharging()
+{
+  if (digitalRead(CHARGING))
+      {
+          delay(10);
+          if (digitalRead(CHARGING))
+            return HIGH;
+      }
+   else return LOW;
 }
 
 void idle()
 {
-  MeasureGyro(false);
-  OutputLight(false);
-    return;
+    MeasureGyro(false);
+    OutputLight(false);
+      return;
 }
 
 void mode11()
 {
-  MeasureGyro(true);
-  OutputLight(true);
-  return;
+    MeasureGyro(true);
+    OutputLight(true);
+    return;
 }
 
 void mode12()
 {
-  MeasureGyro(true);
-  OutputLight(false);
-  return;
+    MeasureGyro(true);
+    OutputLight(false);
+    return;
 }
 
 
 void mode0()
 {
-  MeasureGyro(false);
-  OutputLight(true);
-  return;
+    MeasureGyro(false);
+    OutputLight(true);
+    return;
 }
 
 
 void MeasureGyro(bool gyro_on)
 {
 
-
-
-  
   if(gyro_on)
   {
-    // read raw accel/gyro measurements from device
-    
-    totalax = totalax - readingsx[readIndex];
-    totalay = totalay - readingsy[readIndex];
-    //totalaz = totalaz - readingsz[readIndex];
-    
-    accelgyro.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-    readingsx[readIndex] = ax;
-    readingsy[readIndex] = ay;
-   // readingsz[readIndex] = az;
-    
-    totalax = totalax + readingsx[readIndex];
-    totalay = totalay + readingsy[readIndex];
-    //totalaz = totalaz + readingsz[readIndex];
-    
-    readIndex=readIndex+1;
+    if (!LEFT_ON){
+      totalax = totalax - readingsx[readIndex];
+      totalay = totalay - readingsy[readIndex];
+      //totalaz = totalaz - readingsz[readIndex];
+      
+      accelgyro.getAcceleration(&ax, &ay, &az);
+      readingsx[readIndex] = ax;
+      readingsy[readIndex] = ay;
+     // readingsz[readIndex] = az; 
+      
+      totalax = totalax + readingsx[readIndex];
+      totalay = totalay + readingsy[readIndex];
+      //totalaz = totalaz + readingsz[readIndex];
+      
+      readIndex=readIndex+1;
+  
+      if(readIndex >= numReadings) { readIndex = 0;}
+      
+      averageax = totalax/numReadings;
+      averageay = totalay/numReadings;
+     //averageaz = totalaz/numReadings;
 
-    if(readIndex >= numReadings) { readIndex = 0;}
-    
-    averageax = totalax/numReadings;
-    averageay = totalay/numReadings;
-   // averageaz = totalaz/numReadings;
-    
-    Serial.print("Average: ");
-    Serial.print(averageax);
-    
-
-    
-
-    if(az < -15000)
-    {
-      CUBE_FLIPPED = true;
+           Serial.print("\t");
+        Serial.print(az); Serial.print("\t");
+        Serial.print(averageax); Serial.print("\t");
+        Serial.print(averageay); Serial.print("\t");
     }
+        if(az < -16000)
+        {
+          if ((millis() - azTime) > 1000)
+        {
+          if (az < -16000)
+          CUBE_FLIPPED = true;
+        }
+         azTime = millis();
+        }
+        
+        if (averageax > 15000)
+        {
+           if ((millis() - axTime) > 1000)
+            {
+              if (averageax > 15000)
+              LEFT_ON = true;
+              RIGHT_ON = false;
+            }
+              axTime = millis(); 
+        }
+
+        
+
+        if (averageax < -15000)
+        {
+           if ((millis() - axxTime) > 1000)
+            {
+              if (averageax < -15000)
+              RIGHT_ON = true;
+              LEFT_ON = false;
+            }
+              axxTime = millis(); 
+        }
+
+      if (averageay > 15000)
+        {
+           if ((millis() - ayTime) > 1000)
+            {
+              if (averageay > 15000)
+              LEFT_ON = false;
+              RIGHT_ON = false;
+            }
+              ayTime = millis(); 
+        }
+        
   }
-  else
-  {
-    return;
-  }
   
-  
-  
+   else
+   {
+     return;
+   }
+   
   return;
 }
 
 
 
-
-
-
-
-  
 void OutputLight(bool light_on)
 {
-
-
-//Modify how strongly the lights responds to movement
-const float Sensitivity = 3;
-  
- if (light_on)
-  
-      {
-        
-          ChangePalettePeriodically();
+    if (light_on)
     
-    static uint8_t startIndex = 0;
-    startIndex = startIndex + 1; /* motion speed */
-    
-    FillLEDsFromPaletteColors( startIndex);
-    
-    FastLED.show();
-    FastLED.delay(1000 / UPDATES_PER_SECOND);
-        
-        
-        
-        /*
-        
-            if (averageax < 0)
-              {
-                neg_averageax = -averageax;
-                averageax = 0;
-              }
-        
-             if (averageay < 0)
-             {
-              neg_averageay = -averageay;
-              averageay = 0;
-             }
-  
-  int LedsPosY  = map(averageay, 0, 16200, 0, 255);
-  int LedsPosX = map(averageax, 0, 16200, 0, 255);
-  int LedsNegY = map(neg_averageay, 0, 16200, 0, 255);
-  int LedsNegX  = map(neg_averageax, 0, 16200, 0, 255);
-
-  LedsPosY = LedsPosY*Sensitivity;
-  LedsPosX = LedsPosX*Sensitivity;
-  LedsNegY = LedsNegY*Sensitivity;
-  LedsNegX = LedsNegX*Sensitivity;
-  
-//limit output to prevent overflow brightness
-  if (LedsPosY > 255)
-    LedsPosY = 255;
-    
-    if (LedsPosX > 255)
-    LedsPosX = 255;
-    
-    if (LedsNegY > 255)
-    LedsNegY = 255;
-    
-    if (LedsNegX > 255)
-    LedsNegX = 255;
-
-        Serial.print("\t");
-        Serial.print(LedsPosY); Serial.print("\t");
-        Serial.print(LedsPosX); Serial.print("\t");
-        Serial.print(LedsNegY); Serial.print("\t");
-        Serial.print(LedsNegX); Serial.print("\t");
-
-      int ledintensity[12] = {0};
-
-
-      ledintensity[0] = .5*LedsPosX + .5*LedsPosY;
-      ledintensity[1] = .5*LedsPosX + .35*LedsPosY;
-      ledintensity[2] = .5*LedsPosX + .35*LedsNegY;
-      ledintensity[3] = .5*LedsPosX + .5*LedsNegY;
-      ledintensity[4] = .5*LedsNegY + .35*LedsPosY;
-      ledintensity[5] = .5*LedsNegY + .35*LedsNegX;
-      ledintensity[6] = .5*LedsNegY + .5*LedsNegX;
-      ledintensity[7] = .5*LedsNegX + .35*LedsNegY;
-      ledintensity[8] = .5*LedsNegX + .35*LedsPosY;
-      ledintensity[9] = .5*LedsNegX + .5*LedsPosY;
-      ledintensity[10] = .5*LedsPosY + .35*LedsNegX;
-      ledintensity[11] = .5*LedsPosY + .35*LedsPosX;
-
-      
-for (int i = 0; i < 12; i++)
-      {
-        leds[i] = CRGB::White;
-        leds[i] -= CRGB(0, ledintensity[i], ledintensity[i]);
-        leds[i] += CRGB(ledintensity[i], 0, 0);
+        {
+          if (LEFT_ON)
+          {
+            RotationLedsON();
+            return;
+          }
+          
+          else if (RIGHT_ON)
+          {
+            RaindowsLedsON();
+            return;
+          }
+          else
+          {
+          DefaultLedsON();
+          return;
+          }
         }
-        FastLED.show();*/
- }
-
-
- 
- 
-  else{
-    for (int i=0; i < 12; i++)
-    {
-      leds[i] = CRGB::Black;
-      
+        
+    else{
+      for (int i=0; i < 12; i++)
+      {
+        leds[i] = CRGB::Black;
+      }
+      FastLED.show();
     }
-    FastLED.show();
-  }
-  
-  return;
-
+    return;
 }
 
 void modeChange()
@@ -455,29 +454,110 @@ void modeChange()
     leds[i] = CRGB::Black;
     FastLED.show();
   }
-  
-
-
 }
 
-// This example shows several ways to set up and use 'palettes' of colors
-// with FastLED.
-//
-// These compact palettes provide an easy way to re-colorize your
-// animation on the fly, quickly, easily, and with low overhead.
-//
-// USING palettes is MUCH simpler in practice than in theory, so first just
-// run this sketch, and watch the pretty lights as you then read through
-// the code.  Although this sketch has eight (or more) different color schemes,
-// the entire sketch compiles down to about 6.5K on AVR.
-//
-// FastLED provides a few pre-configured color palettes, and makes it
-// extremely easy to make up your own color schemes with palettes.
-//
-// Some notes on the more abstract 'theory and practice' of
-// FastLED compact palettes are at the bottom of this file.
+
+void DefaultLedsON()
+{
+            if (averageax < 0)
+              {
+                neg_averageax = -averageax;
+                averageax = 0;
+              }
+              
+             if (averageay < 0)
+             {
+              neg_averageay = -averageay;
+              averageay = 0;
+             }
+  
+  int LedsPosY  = map(averageay, 0, 16300, 0, 255);
+  int LedsPosX = map(averageax, 0, 16300, 0, 255);
+  int LedsNegY = map(neg_averageay, 0, 16300, 0, 255);
+  int LedsNegX  = map(neg_averageax, 0, 16300, 0, 255);
+
+  LedsPosY = LedsPosY*Sensitivity;
+  LedsPosX = LedsPosX*Sensitivity;
+  LedsNegY = LedsNegY*Sensitivity;
+  LedsNegX = LedsNegX*Sensitivity;
+  
+//limit output to prevent overflow brightness
+  if (LedsPosY > 255)
+    LedsPosY = 255;
+    
+    if (LedsPosX > 255)
+    LedsPosX = 255;
+    
+    if (LedsNegY > 255)
+    LedsNegY = 255;
+    
+    if (LedsNegX > 255)
+    LedsNegX = 255;
 
 
+
+      int ledintensity[12] = {0};
+
+
+      ledintensity[0] = LedsPosX + LedsPosY;
+      ledintensity[1] = LedsPosX + .1*LedsPosY;
+      ledintensity[2] = LedsPosX + .1*LedsNegY;
+      ledintensity[3] = LedsPosX + LedsNegY;
+      ledintensity[4] = LedsNegY + .1*LedsPosX;
+      ledintensity[5] = LedsNegY + .1*LedsNegX;
+      ledintensity[6] = LedsNegY + LedsNegX;
+      ledintensity[7] = LedsNegX + .1*LedsNegY;
+      ledintensity[8] = LedsNegX + .1*LedsPosY;
+      ledintensity[9] = LedsNegX + LedsPosY;
+      ledintensity[10] = LedsPosY + .1*LedsNegX;
+      ledintensity[11] = LedsPosY + .1*LedsPosX;
+
+for (int i = 0; i < 12; i++)
+      {
+        if (ledintensity[i] > 255)
+          ledintensity[i] = 255;
+        leds[i] = CRGB::Black;
+        leds[i] += CRGB(0,0,10);
+        leds[i] += CRGB(ledintensity[i], 0, 0);
+        }
+        FastLED.show();
+
+        return;
+}
+
+void RotationLedsON()
+{
+     if ((ypr[0] * 180/M_PI) < 0)
+        ypr[0] = 360 + (ypr[0] * (180/M_PI));
+      else
+        ypr[0] = ypr[0] * (180/M_PI);
+        
+        for (int i=0; i < 12; i++)
+            {
+              leds[i] = CRGB::Black;
+              leds[i] = ledpick(i);
+            }
+            FastLED.show();
+}
+
+
+
+
+void RaindowsLedsON()
+{
+          ChangePalettePeriodically();
+    
+    static uint8_t startIndex = 0;
+    startIndex = startIndex + 1; /* motion speed */
+    
+    FillLEDsFromPaletteColors( startIndex);
+    
+    FastLED.show();
+   FastLED.delay(1000 / UPDATES_PER_SECOND);
+        
+        return;
+  
+}
 
 
 void FillLEDsFromPaletteColors( uint8_t colorIndex)
@@ -491,14 +571,10 @@ void FillLEDsFromPaletteColors( uint8_t colorIndex)
 }
 
 
-// There are several different palettes of colors demonstrated here.
-//
-// FastLED provides several 'preset' palettes: RainbowColors_p, RainbowStripeColors_p,
-// OceanColors_p, CloudColors_p, LavaColors_p, ForestColors_p, and PartyColors_p.
-//
-// Additionally, you can manually define your own color palettes, or you can write
-// code that creates color palettes on the fly.  All are shown here.
-
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//FASTLED PATTERNS
+//                                        FASTLED PATTERNS
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void ChangePalettePeriodically()
 {
     uint8_t secondHand = (millis() / 1000) % 60;
@@ -585,26 +661,172 @@ const TProgmemPalette16 myRedWhiteBluePalette_p PROGMEM =
     CRGB::Black
 };
 
+CRGB ledpick(int i)
+{
+  int j = 11 - i;
+  int i_ypr = ypr[0];
+  int granR;
+  int granG;
+  int granB;
+  if (ypr[0] > (j) * 30 && ypr[0] < (j) * 30+30)
+  {
+    
+    granR = map(i_ypr%30, 0, 30, 255, 128);
+    granG = map(i_ypr%30, 0, 30, 0, 128);
+    return CRGB( granR, granG, 0);   
+  }
 
+else if (ypr[0] > (j+1) * 30 && ypr[0] < (j+1) * 30+30)
+  {
+    granR = map(i_ypr%30, 0, 30, 128, 0);
+    granG = map(i_ypr%30, 0, 30, 128, 255);
+    return CRGB( granR, granG, 0);   
+  }
 
-// Additional notes on FastLED compact palettes:
-//
-// Normally, in computer graphics, the palette (or "color lookup table")
-// has 256 entries, each containing a specific 24-bit RGB color.  You can then
-// index into the color palette using a simple 8-bit (one byte) value.
-// A 256-entry color palette takes up 768 bytes of RAM, which on Arduino
-// is quite possibly "too many" bytes.
-//
-// FastLED does offer traditional 256-element palettes, for setups that
-// can afford the 768-byte cost in RAM.
-//
-// However, FastLED also offers a compact alternative.  FastLED offers
-// palettes that store 16 distinct entries, but can be accessed AS IF
-// they actually have 256 entries; this is accomplished by interpolating
-// between the 16 explicit entries to create fifteen intermediate palette
-// entries between each pair.
-//
-// So for example, if you set the first two explicit entries of a compact 
-// palette to Green (0,255,0) and Blue (0,0,255), and then retrieved 
-// the first sixteen entries from the virtual palette (of 256), you'd get
-// Green, followed by a smooth gradient from green-to-blue, and then Blue.
+else if (ypr[0] > (j+2) * 30 && ypr[0] < (j+2) * 30+30)
+  {
+    granG = map(i_ypr%30, 0, 30, 255, 128);
+    granB = map(i_ypr%30, 0, 30, 0, 128);
+    return CRGB( 0, granG, granB);   
+  }
+
+else if (ypr[0] > (j+3) * 30 && ypr[0] < (j+3) * 30+30)
+  {
+    granG = map(i_ypr%30, 0, 30, 128, 0);
+    granB = map(i_ypr%30, 0, 30, 128, 255);
+    return CRGB( 0, granG, granB);   
+  }
+  
+else if (ypr[0] > (j+4) * 30 && ypr[0] < (j+4) * 30+30)
+  {
+    granR = map(i_ypr%30, 0, 30, 0, 128);
+    granB = map(i_ypr%30, 0, 30, 255, 128);
+    return CRGB( granR, 0, granB);
+  }
+
+else if (ypr[0] > (j+5) * 30 && ypr[0] < (j+5) * 30+30)
+  {
+    granR = map(i_ypr%30, 0, 30, 128, 255);
+    granB = map(i_ypr%30, 0, 30, 128, 0);
+    return CRGB( granR, 0, granB);   
+  }
+else  if (ypr[0] > (j+6) * 30 && ypr[0] < (j+6) * 30+30)
+  {
+    
+    granR = map(i_ypr%30, 0, 30, 255, 128);
+    granG = map(i_ypr%30, 0, 30, 0, 128);
+    return CRGB( granR, granG, 0);   
+  }
+else if (ypr[0] > (j+7) * 30 && ypr[0] < (j+7) * 30+30)
+  {
+    granR = map(i_ypr%30, 0, 30, 128, 0);
+    granG = map(i_ypr%30, 0, 30, 128, 255);
+    return CRGB( granR, granG, 0);   
+  }
+
+else if (ypr[0] > (j+8) * 30 && ypr[0] < (j+8) * 30+30)
+  {
+    granG = map(i_ypr%30, 0, 30, 255, 128);
+    granB = map(i_ypr%30, 0, 30, 0, 128);
+    return CRGB( 0, granG, granB);   
+  }
+
+else if (ypr[0] > (j+9) * 30 && ypr[0] < (j+9) * 30+30)
+  {
+    granG = map(i_ypr%30, 0, 30, 128, 0);
+    granB = map(i_ypr%30, 0, 30, 128, 255);
+    return CRGB( 0, granG, granB);   
+  }
+  
+else if (ypr[0] > (j+10) * 30 && ypr[0] < (j+10) * 30+30)
+  {
+    granR = map(i_ypr%30, 0, 30, 0, 128);
+    granB = map(i_ypr%30, 0, 30, 255, 128);
+    return CRGB( granR, 0, granB);
+  }
+
+else if (ypr[0] > (j+11) * 30 && ypr[0] < (j+11) * 30+30)
+  {
+    granR = map(i_ypr%30, 0, 30, 128, 255);
+    granB = map(i_ypr%30, 0, 30, 128, 0);
+    return CRGB( granR,0, granB);   
+  }
+
+else if (ypr[0] > (j-1) * 30 && ypr[0] < (j-1) * 30+30)
+  {
+    granR = map(i_ypr%30, 0, 30, 128, 255);
+    granB = map(i_ypr%30, 0, 30, 128, 0);
+    return CRGB( granR, 0, granB);   
+  }
+
+else if (ypr[0] > (j-2) * 30 && ypr[0] < (j-2) * 30+30)
+  {
+    granR = map(i_ypr%30, 0, 30, 0, 128);
+    granB = map(i_ypr%30, 0, 30, 255, 128);
+    return CRGB( granR, 0, granB);   
+  }
+
+else if (ypr[0] > (j-3) * 30 && ypr[0] < (j-3) * 30+30)
+  {
+    granG = map(i_ypr%30, 0, 30, 128, 0);
+    granB = map(i_ypr%30, 0, 30, 128, 255);
+    return CRGB( 0, granG, granB);   
+  }
+  
+else if (ypr[0] > (j-4) * 30 && ypr[0] < (j-4) * 30+30)
+  {
+    granG = map(i_ypr%30, 0, 30, 255, 128);
+    granB = map(i_ypr%30, 0, 30, 0, 128);
+    return CRGB( 0, granG, granB);
+  }
+
+else if (ypr[0] > (j-5) * 30 && ypr[0] < (j-5) * 30+30)
+  {
+    granR = map(i_ypr%30, 0, 30, 128, 0);
+    granG = map(i_ypr%30, 0, 30, 128, 255);
+    return CRGB( granR, granG, 0);   
+  }
+  
+else  if (ypr[0] > (j-6) * 30 && ypr[0] < (j-6) * 30+30)
+  {
+    granR = map(i_ypr%30, 0, 30, 255, 128);
+    granG = map(i_ypr%30, 0, 30, 0, 128);
+    return CRGB( granR, granG, 0);   
+  }
+else if (ypr[0] > (j-7) * 30 && ypr[0] < (j-7) * 30+30)
+  {
+    granR = map(i_ypr%30, 0, 30, 128, 255);
+    granB = map(i_ypr%30, 0, 30, 128, 0);
+    return CRGB( granR, 0, granB);   
+  }
+
+else if (ypr[0] > (j-8) * 30 && ypr[0] < (j-8) * 30+30)
+  {
+    granR = map(i_ypr%30, 0, 30, 0, 128);
+    granB = map(i_ypr%30, 0, 30, 255, 128);
+    return CRGB( granR, 0, granB);   
+  }
+
+else if (ypr[0] > (j-9) * 30 && ypr[0] < (j-9) * 30+30)
+  {
+    granG = map(i_ypr%30, 0, 30, 128, 0);
+    granB = map(i_ypr%30, 0, 30, 128, 255);
+    return CRGB( 0, granG, granB);   
+  }
+  
+else if (ypr[0] > (j-10) * 30 && ypr[0] < (j-10) * 30+30)
+  {
+    granG = map(i_ypr%30, 0, 30, 255, 128);
+    granB = map(i_ypr%30, 0, 30, 0, 128);
+    return CRGB( 0, granG, granB);
+  }
+
+else if (ypr[0] > (j-11) * 30 && ypr[0] < (j-11) * 30+30)
+  {
+    granG = map(i_ypr%30, 0, 30, 128, 255);
+    granR = map(i_ypr%30, 0, 30, 128, 0);
+    return CRGB( granR, granG, 0);   
+ }
+  else
+    return CRGB::Black;
+}
