@@ -85,9 +85,8 @@ bool CUBE_FLIPPED = false;
 bool blinkState = false;
 bool LEFT_ON = false;
 bool RIGHT_ON = false;
+bool LEFT_ON2 = false;
 
-// the following variables are unsigned longs because the time, measured in
-// milliseconds, will quickly become a bigger number than can be stored in an int.
 
 // ================================================================
 // ===               INTERRUPT DETECTION ROUTINE                ===
@@ -130,13 +129,21 @@ void setup() {
 
     // use the code below to change accel/gyro offset values
     Serial.println("Updating internal sensor offsets...");
-    accelgyro.setXAccelOffset(46);
+    /*accelgyro.setXAccelOffset(46);  //with niko
     accelgyro.setYAccelOffset(-981);
     accelgyro.setZAccelOffset(1342);
     accelgyro.setXGyroOffset(51);
     accelgyro.setYGyroOffset(-12);
+    accelgyro.setZGyroOffset(-5);*/
+    
+    accelgyro.setXAccelOffset(300);
+    accelgyro.setYAccelOffset(-1048);
+    accelgyro.setZAccelOffset(1368);
+    accelgyro.setXGyroOffset(52);
+    accelgyro.setYGyroOffset(-11);
     accelgyro.setZGyroOffset(-5);
 
+    
  // make sure it worked (returns 0 if so)
     if (devStatus == 0) {
         // Calibration Time: generate offsets and calibrate our MPU6050
@@ -311,32 +318,32 @@ void MeasureGyro(bool gyro_on)
         Serial.print(ypr[0]*(180/M_PI)); Serial.print("\t");
         Serial.print(ypr[1]*(180/M_PI)); Serial.print("\t");
         Serial.print(ypr[2]*(180/M_PI)); Serial.print("\t");
-    /*
-        if(az < -16000)
-        {
-          if ((millis() - azTime) > 1000)
-        {
-          if (az < -16000)
-          CUBE_FLIPPED = true;
-        }
-         azTime = millis();
-        }
-        */
+
         if (ypr[1] > 1.4)
         {
               axcounter = axcounter + 1;
         }
         else
           axcounter = 0;
-         if (axcounter > 50)
+         if (axcounter > 30)
             {
               modeChange();
+              
+              if (LEFT_ON&&!LEFT_ON2)
+              {
+                LEFT_ON2 = true;
+                Serial.print("LEFT_ON2 = true");}
+               else
+                  {LEFT_ON2 = false;
+                  Serial.print("LEFT_ON2 = false");}
+                  
               LEFT_ON = true;
               RIGHT_ON = false;
               axcounter = 0;
               axxcounter = 0;
               ayycounter = 0;
               aycounter = 0;
+
             }
             
 
@@ -346,10 +353,11 @@ void MeasureGyro(bool gyro_on)
         }
         else
           axxcounter = 0;
-         if (axxcounter > 50)
+         if (axxcounter > 30)
             {
               modeChange();
               LEFT_ON = false;
+              LEFT_ON2 = false;
               RIGHT_ON = true;
               axcounter = 0;
               axxcounter = 0;
@@ -364,10 +372,11 @@ void MeasureGyro(bool gyro_on)
         }
         else
           aycounter = 0;
-         if (aycounter > 50)
+         if (aycounter > 30)
             {
               modeChange();
               LEFT_ON = false;
+              LEFT_ON2 = false;
               RIGHT_ON = false;
               axcounter = 0;
               axxcounter = 0;
@@ -382,11 +391,12 @@ void MeasureGyro(bool gyro_on)
         }
         else
           ayycounter = 0;
-         if (ayycounter > 50)
+         if (ayycounter > 30)
             {
               modeChange();
               LEFT_ON = true;
               RIGHT_ON = true;
+               LEFT_ON2 = false;
               axcounter = 0;
               axxcounter = 0;
               ayycounter = 0;
@@ -400,12 +410,12 @@ void MeasureGyro(bool gyro_on)
    }
 
 
-         Serial.print("axcounter:    ");
+        /* Serial.print("axcounter:    ");
          Serial.print(axcounter);
          Serial.print("\t");
          Serial.print("aycounter:    ");
          Serial.print(aycounter);
-        Serial.print("\t");
+        Serial.print("\t");*/
 
    
   return;
@@ -491,11 +501,11 @@ void DefaultLedsON()
   int LedsNegY = map(n_ypr[2]*(180/M_PI), 0, 70, 0, 255);
   int LedsNegX  = map(n_ypr[1]*(180/M_PI), 0, 70, 0, 255);
 
-        Serial.print("\t");
+        /*Serial.print("\t");
         Serial.print(LedsPosY); Serial.print("\t");
         Serial.print(LedsPosX); Serial.print("\t");
         Serial.print(LedsNegY); Serial.print("\t");
-        Serial.print( LedsNegX); Serial.print("\t");
+        Serial.print( LedsNegX); Serial.print("\t");*/
   LedsPosY = LedsPosY*Sensitivity;
   LedsPosX = LedsPosX*Sensitivity;
   LedsNegY = LedsNegY*Sensitivity;
@@ -541,6 +551,26 @@ for (int i = 0; i < 12; i++)
         leds[i] = CRGB::Black;
         leds[i] += CRGB(0,0,10);
         leds[i] += CRGB(ledintensity[i], 0, 0);
+        
+        if (i == 1 || i == 2)
+        {
+          leds[i] -= CRGB(0, 0, ledintensity[i]);
+        }
+        else if (i == 4 || i == 5)
+        {
+        leds[i] -= CRGB(ledintensity[i], 0, ledintensity[i]);
+        leds[i] += CRGB(0, 0, ledintensity[i]);
+        }
+        else if (i == 7 || i == 8)
+        {
+          leds[i] -= CRGB(ledintensity[i], 0, ledintensity[i]);
+          leds[i] += CRGB(0, ledintensity[i], 0);
+        }
+        else if (i == 10 || i == 11)
+        {
+          leds[i] -= CRGB(0, 0, ledintensity[i]);
+          leds[i] += CRGB(0, ledintensity[i], 0);
+        }
         }
         FastLED.show();
         return;
@@ -552,25 +582,35 @@ void RotationLedsON()
         ypr[0] = 360 + (ypr[0] * (180/M_PI));
       else
         ypr[0] = ypr[0] * (180/M_PI);
-        
+
+     if (!LEFT_ON2)
+     {
         for (int i=0; i < 12; i++)
             {
               leds[i] = CRGB::Black;
               leds[i] = ledpick(i);
             }
+     }
+     else if (LEFT_ON2)
+     {
+          for (int i=0; i < 12; i++)
+            {
+              leds[i] = CRGB::Black;
+              leds[i] = ledpick_two(i);
+           }
+     }
             FastLED.show();
 }
 
 
-
+/*
 //led light rotation from FASTLED library
 void RaindowsLedsON()
 {
           ChangePalettePeriodically();
     
     static uint8_t startIndex = 0;
-    startIndex = startIndex + 1; /* motion speed */
-    
+    startIndex = startIndex + 1; // motion speed 
     FillLEDsFromPaletteColors( startIndex);
     
     FastLED.show();
@@ -578,7 +618,7 @@ void RaindowsLedsON()
         
         return;
   
-}
+}*/
 
 
 void FillLEDsFromPaletteColors( uint8_t colorIndex)
@@ -603,108 +643,41 @@ void OffLedsON()
 
 void WarmGlowLedsON()
 {
-  
-  for (int i = 0; i < 12; i++)
+   for (int i = 0; i < 12; i++)
   {
     leds[i] = CRGB(255,255,100);
     FastLED.show();
   }
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//FASTLED PATTERNS
-//                                        FASTLED PATTERNS
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void ChangePalettePeriodically()
+
+CRGB ledpick(int i)
 {
-    uint8_t secondHand = (millis() / 1000) % 60;
-    static uint8_t lastSecond = 99;
-    
-    if( lastSecond != secondHand) {
-        lastSecond = secondHand;
-        if( secondHand ==  0)  { currentPalette = RainbowColors_p;         currentBlending = LINEARBLEND; }
-        if( secondHand == 10)  { currentPalette = RainbowStripeColors_p;   currentBlending = NOBLEND;  }
-        if( secondHand == 15)  { currentPalette = RainbowStripeColors_p;   currentBlending = LINEARBLEND; }
-        if( secondHand == 20)  { SetupPurpleAndGreenPalette();             currentBlending = LINEARBLEND; }
-        if( secondHand == 25)  { SetupTotallyRandomPalette();              currentBlending = LINEARBLEND; }
-        if( secondHand == 30)  { SetupBlackAndWhiteStripedPalette();       currentBlending = NOBLEND; }
-        if( secondHand == 35)  { SetupBlackAndWhiteStripedPalette();       currentBlending = LINEARBLEND; }
-        if( secondHand == 40)  { currentPalette = CloudColors_p;           currentBlending = LINEARBLEND; }
-        if( secondHand == 45)  { currentPalette = PartyColors_p;           currentBlending = LINEARBLEND; }
-        if( secondHand == 50)  { currentPalette = myRedWhiteBluePalette_p; currentBlending = NOBLEND;  }
-        if( secondHand == 55)  { currentPalette = myRedWhiteBluePalette_p; currentBlending = LINEARBLEND; }
-    }
+  int j = 11 - i;
+  int i_ypr = ypr[0];
+  if (ypr[0] > (j) * 30 && ypr[0] < (j) * 30+30)
+  {
+    return CRGB::Green;
+  }
+  else if (ypr[0] > (j+1) * 30 && ypr[0] < (j+1) * 30+30)
+  {
+    return CRGB::Red;
+  }
+  
+  else if (ypr[0] > (j-1) * 30 && ypr[0] < (j-1) * 30+30)
+  {
+    return CRGB::Blue; 
+  }
+  
+  else 
+    return CRGB::Black;
 }
 
-// This function fills the palette with totally random colors.
-void SetupTotallyRandomPalette()
-{
-    for( int i = 0; i < 16; i++) {
-        currentPalette[i] = CHSV( random8(), 255, random8());
-    }
-}
-
-// This function sets up a palette of black and white stripes,
-// using code.  Since the palette is effectively an array of
-// sixteen CRGB colors, the various fill_* functions can be used
-// to set them up.
-void SetupBlackAndWhiteStripedPalette()
-{
-    // 'black out' all 16 palette entries...
-    fill_solid( currentPalette, 16, CRGB::Black);
-    // and set every fourth one to white.
-    currentPalette[0] = CRGB::White;
-    currentPalette[4] = CRGB::White;
-    currentPalette[8] = CRGB::White;
-    currentPalette[12] = CRGB::White;
-    
-}
-
-// This function sets up a palette of purple and green stripes.
-void SetupPurpleAndGreenPalette()
-{
-    CRGB purple = CHSV( HUE_PURPLE, 255, 255);
-    CRGB green  = CHSV( HUE_GREEN, 255, 255);
-    CRGB black  = CRGB::Black;
-    
-    currentPalette = CRGBPalette16(
-                                   green,  green,  black,  black,
-                                   purple, purple, black,  black,
-                                   green,  green,  black,  black,
-                                   purple, purple, black,  black );
-}
-
-
-// This example shows how to set up a static color palette
-// which is stored in PROGMEM (flash), which is almost always more
-// plentiful than RAM.  A static PROGMEM palette like this
-// takes up 64 bytes of flash.
-const TProgmemPalette16 myRedWhiteBluePalette_p PROGMEM =
-{
-    CRGB::Red,
-    CRGB::Gray, // 'white' is too bright compared to red and blue
-    CRGB::Blue,
-    CRGB::Black,
-    
-    CRGB::Red,
-    CRGB::Gray,
-    CRGB::Blue,
-    CRGB::Black,
-    
-    CRGB::Red,
-    CRGB::Red,
-    CRGB::Gray,
-    CRGB::Gray,
-    CRGB::Blue,
-    CRGB::Blue,
-    CRGB::Black,
-    CRGB::Black
-};
 
 
 
 //roation logic
-CRGB ledpick(int i)
+CRGB ledpick_two(int i)
 {
   int j = 11 - i;
   int i_ypr = ypr[0];
