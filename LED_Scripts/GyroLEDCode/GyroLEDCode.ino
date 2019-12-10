@@ -20,7 +20,7 @@ MPU6050 accelgyro;
 
 #define LED_PIN     5
 #define NUM_LEDS    12
-#define BRIGHTNESS  255
+#define BRIGHTNESS  100
 #define LED_TYPE    WS2812
 #define COLOR_ORDER GRB
 #define INTERRUPT_PIN 3
@@ -29,7 +29,7 @@ MPU6050 accelgyro;
 
 
 //Smoothing globals
-  const float Sensitivity = 2;
+  const float Sensitivity = 1.5;
   const int numReadings = 10;
   int readIndex = 0;              // the index of the current reading
   
@@ -37,12 +37,13 @@ MPU6050 accelgyro;
   int readingsy[numReadings];      // the readings from the analog input
   //int readingsz[numReadings];      // the readings from the analog input
   
+unsigned long prevTime = millis(); //time used for shake detect
+uint16_t prevaa[3] = {0};
 
-
-int axcounter = 0;
-int axxcounter = 0;
-int aycounter = 0;
-int ayycounter = 0;
+uint8_t PosXCounter = 0;
+uint8_t NegXCounter = 0;
+uint8_t PosYCounter = 0;
+uint8_t NegYCounter = 0;
 
   // MPU control/status vars
 bool dmpReady = false;  // set true if DMP init was successful
@@ -83,9 +84,11 @@ state_enum currentState = IDLE1;
 
 bool CUBE_FLIPPED = false;
 bool blinkState = false;
-bool LEFT_ON = false;
-bool RIGHT_ON = false;
-bool LEFT_ON2 = false;
+
+bool ROTATION_RAINBOW = false;
+bool ROTATION_3 = false;
+bool WARM_GLOW = false;
+bool DEF = true; //true here
 
 
 // ================================================================
@@ -103,7 +106,7 @@ void setup() {
    Serial.begin(115200);
     pinMode(CHARGING,INPUT);
     pinMode(INTERRUPT_PIN, INPUT);
-    delay( 3000 ); // power-up safety delay
+    delay( 500 ); // power-up safety delay
     FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
     FastLED.setBrightness(  BRIGHTNESS );
     
@@ -197,7 +200,7 @@ switch(currentState)
 {
   case IDLE1: if(deboCharging())
   { idle(); 
-  Serial.print("S: IDLE1");
+  Serial.print("S: IDLE1");  //Idle mode, startup
   }
   
   else 
@@ -206,10 +209,10 @@ switch(currentState)
   };
   break;
   case MODE11: if(!CUBE_FLIPPED && !deboCharging()) 
-  {mode11(); Serial.print("S: Disconnected from Charger, lights on \n");}
+  {mode11(); Serial.print("\n");}
   
   else if(CUBE_FLIPPED)
-  {CUBE_FLIPPED = false; modeChange(); currentState = MODE12;  mode12(); Serial.print("S: MODE12");}
+  {CUBE_FLIPPED = false; modeChange(1); currentState = MODE12;  mode12(); Serial.print("S: MODE12 \n");}
   
   else if(deboCharging())
   {currentState = MODE0; mode0();Serial.print("S: Charging, lights on \n");};
@@ -219,15 +222,15 @@ switch(currentState)
   {mode12();Serial.print("S: Disconnected from Charger, lights off \n");}
   
   else if(CUBE_FLIPPED)
-  {CUBE_FLIPPED = false; modeChange(); currentState = MODE11; mode11();Serial.print("S: Disconnected from charger, lighhts on (2) \n");}
+  {CUBE_FLIPPED = false; modeChange(1); currentState = MODE11; mode11();Serial.print("S: Disconnected from charger, lighhts on (2) \n");}
   
   else if(deboCharging())
-  {currentState = IDLE1; idle();Serial.print("S: Charging, lights off\n");}
+  {currentState = IDLE1; idle();Serial.print("S: Charging, lights off \n");}
   break;
   case MODE0: if(deboCharging())
   {mode0();Serial.print("Charging, lights on (2) \n");}
   else
-  {currentState = MODE11;mode11();Serial.print("S: Disconnected from charger, lighhts on (3)\n");}
+  {currentState = MODE11;mode11();Serial.print("S: Disconnected from charger, lighhts on (3) \n");}
   break;
   } // end switch state;
         }
@@ -261,8 +264,10 @@ switch(currentState)
       fifoCount -= packetSize;
     }
             accelgyro.dmpGetQuaternion(&r, fifoBuffer);
+            accelgyro.dmpGetAccel(&aa, fifoBuffer);
             accelgyro.dmpGetGravity(&gravity, &r);
-            accelgyro.dmpGetYawPitchRoll(ypr, &r, &gravity); 
+            accelgyro.dmpGetYawPitchRoll(ypr, &r, &gravity);
+
             }
 }  //end of loop()
 
@@ -308,143 +313,192 @@ void mode0()
 }
 
 
+//////////////////////////
+//MeasureGyro
+//Decides if we should check gyro values, based on input
+//Decides logic for leds light output, choose colors
+/////////////////////////
+
 void MeasureGyro(bool gyro_on)
 {
-
-
   if(gyro_on)
   {
+
+    bool TempShake = detectShake();
+
+    if (TempShake&&CUBE_FLIPPED)
+       CUBE_FLIPPED = false;
+    else if (TempShake && !CUBE_FLIPPED)
+      CUBE_FLIPPED = true;
+
+    /*
       Serial.print("\t");
-        Serial.print(ypr[0]*(180/M_PI)); Serial.print("\t");
-        Serial.print(ypr[1]*(180/M_PI)); Serial.print("\t");
-        Serial.print(ypr[2]*(180/M_PI)); Serial.print("\t");
+        Serial.print(ypr[0]); Serial.print("\t");
+        Serial.print(ypr[1]); Serial.print("\t");
+        Serial.print(ypr[2]); Serial.print("\t");
+        
+              Serial.print("\t");
+        Serial.print(aa.x); Serial.print("\t");
+        Serial.print(aa.y); Serial.print("\t");
+        Serial.print(aa.z); Serial.print("\t");*/
 
-        if (ypr[1] > 1.4)
+        if (aa.x > 6000)
         {
-              axcounter = axcounter + 1;
-        }
-        else
-          axcounter = 0;
-         if (axcounter > 30)
-            {
-              modeChange();
-              
-              if (LEFT_ON&&!LEFT_ON2)
-              {
-                LEFT_ON2 = true;
-                Serial.print("LEFT_ON2 = true");}
-               else
-                  {LEFT_ON2 = false;
-                  Serial.print("LEFT_ON2 = false");}
-                  
-              LEFT_ON = true;
-              RIGHT_ON = false;
-              axcounter = 0;
-              axxcounter = 0;
-              ayycounter = 0;
-              aycounter = 0;
-
-            }
-            
-
-        if (ypr[1] < -1.4)
-        {
-              axxcounter = axxcounter + 1;
-        }
-        else
-          axxcounter = 0;
-         if (axxcounter > 30)
-            {
-              modeChange();
-              LEFT_ON = false;
-              LEFT_ON2 = false;
-              RIGHT_ON = true;
-              axcounter = 0;
-              axxcounter = 0;
-              ayycounter = 0;
-              aycounter = 0;
-            }
-            
-
-        if (ypr[2] > 1.4)
-        {
-              aycounter = aycounter + 1;
-        }
-        else
-          aycounter = 0;
-         if (aycounter > 30)
-            {
-              modeChange();
-              LEFT_ON = false;
-              LEFT_ON2 = false;
-              RIGHT_ON = false;
-              axcounter = 0;
-              axxcounter = 0;
-              ayycounter = 0;
-              aycounter = 0;
-            }
-
-
-      if (ypr[2] < -1.4)
-        {
-              ayycounter = ayycounter + 1;
-        }
-        else
-          ayycounter = 0;
-         if (ayycounter > 30)
-            {
-              modeChange();
-              LEFT_ON = true;
-              RIGHT_ON = true;
-               LEFT_ON2 = false;
-              axcounter = 0;
-              axxcounter = 0;
-              ayycounter = 0;
-              aycounter = 0;
-            }
+          PosXCounter++; //rainbow rotation
+          NegXCounter = 0;
+          PosYCounter = 0;
+          NegYCounter = 0;
         }
         
+        else if (aa.x < -6000)
+        {
+          PosXCounter = 0;
+          NegXCounter++; //rainbow3
+          PosYCounter = 0;
+          NegYCounter = 0;
+        }
+        else if (aa.y > 6000)
+        {
+          PosXCounter = 0;
+          NegXCounter = 0;
+          PosYCounter++; //warmglow
+          NegYCounter = 0;
+        }
+        else if (aa.y < -6000)
+        {
+          PosXCounter = 0;
+          NegXCounter = 0;
+          PosYCounter = 0;
+          NegYCounter++; //Default
+        }
+        else
+        {
+        return; //if no side is overlimit then return, and don't count up, leave loop
+        }
+
+
+
+    uint8_t side_sent = 30;
+        if (PosXCounter > side_sent && !ROTATION_RAINBOW)
+        {
+          ROTATION_RAINBOW = true;  //true here
+          ROTATION_3 = false;
+          WARM_GLOW = false;
+          DEF = false;
+          modeChange(0);
+        }
+        else if (NegXCounter > side_sent && !ROTATION_3)
+        {
+          ROTATION_RAINBOW = false;
+          ROTATION_3 = true; //true here
+          WARM_GLOW = false;
+          DEF = false;
+          modeChange(0);
+        }
+        else if (PosYCounter > side_sent && !WARM_GLOW)
+        {
+          ROTATION_RAINBOW = false;
+          ROTATION_3 = false;
+          WARM_GLOW = true; //true here
+          DEF = false;
+          modeChange(0);
+        }
+        else if (NegYCounter > side_sent && !DEF)
+        {
+          ROTATION_RAINBOW = false;
+          ROTATION_3 = false;
+          WARM_GLOW = false;
+          DEF = true; //true here
+          modeChange(0);
+        }
+        else
+        {          
+          Serial.print("SOMETHING's NOT RIGHT, gyro_on, else return");
+          return;
+        }
+          PosXCounter = 0;
+          NegXCounter = 0;
+          PosYCounter = 0;
+          NegYCounter = 0; //Default
+
+        
+        
+  } //end of gyro_on
+        
+        return; //gyro is not on, return
+}
+
+/////////////////////////////////
+//detectShake(), no input, detects if the cube was shook
+//returns a boolean depending on if shaking occured
+//////////////////////////////////
+bool detectShake()
+{
+  uint16_t SHAKE_THRESHOLD = 250;  //Change to change shake sensitivity
+  if ((millis() - prevTime) > 100)
+  {
+    unsigned long diffTime = (millis() - prevTime);
+    prevTime = millis();
+
+    signed int tempCalc = (aa.z - prevaa[2]);
+    
+    float gspeed =  abs(tempCalc) / diffTime;
+
+          Serial.print("\t"); Serial.print("gspeed: ");
+                Serial.print(gspeed); Serial.print("\t");
+
+   prevaa[2] = aa.z;
+
+    if (gspeed > SHAKE_THRESHOLD){
+      return true;
+
+      Serial.print("\t");
+      Serial.print("SHAKE DETECTED"); Serial.print("\t");
+    }
+    
     else
-   {
-     return;
-   }
+          Serial.print("\t");
+      Serial.print("Shake not detected");Serial.print("\t");
+    return false;
+    
+  }
 
+  else
+  {return false;
+        Serial.print("\t");
+  Serial.print("never entered loop");Serial.print("\t");
+  }
 
-        /* Serial.print("axcounter:    ");
-         Serial.print(axcounter);
-         Serial.print("\t");
-         Serial.print("aycounter:    ");
-         Serial.print(aycounter);
-        Serial.print("\t");*/
-
-   
-  return;
 }
 
 
-
+/////////////
+//OutputLight
+//decides if lights should be on/off with input
+//picks what pattern to display depending on gyro modes
+////////////
 void OutputLight(bool light_on)
 {
     if (light_on)
     
         {
-          if (LEFT_ON&&RIGHT_ON)
+          if (WARM_GLOW)
           {
             WarmGlowLedsON();
           }
-          else if (LEFT_ON)
+          else if (ROTATION_RAINBOW)
           {
-             RotationLedsON();
+             RotationLedsON(true);
           }
           
-          else if (RIGHT_ON)
-          {
-            OffLedsON();
-          }
-
-          else
+          else if (DEF)
           {
           DefaultLedsON();
+          }
+
+          else if (ROTATION_3)
+          {
+            RotationLedsON(false);
           }
         }
         
@@ -458,8 +512,10 @@ void OutputLight(bool light_on)
     return;
 }
 
-void modeChange()
+void modeChange(uint8_t temp)
 {
+  if (temp == 0) //blue green for color state machine
+  {
     for (int i = 0; i < 12; i++)
   {
     leds[i] = CRGB::Black;
@@ -468,11 +524,31 @@ void modeChange()
   for (int i = 0; i < 12; i++)
   {
     leds[i] = CRGB::Green;
+    leds[11 - i] = CRGB::Blue;
    FastLED.show();
-    delay(100);
+    delay(40);
+    leds[i] = CRGB::Black;
+    leds[11 - i] = CRGB::Black;
+   FastLED.show();   
+  }
+  }
+  
+  else if(temp == 1) //Change color depending on type of mode change (red for stat machine)
+    {
+    for (int i = 0; i < 12; i++)
+  {
+    leds[i] = CRGB::Black;
+  }
+        FastLED.show();
+  for (int i = 0; i < 12; i++)
+  {
+    leds[i] = CRGB::Red;
+   FastLED.show();
+    delay(40);
     leds[i] = CRGB::Black;
    FastLED.show();   
   }
+    }
 
   return;
 }
@@ -480,26 +556,26 @@ void modeChange()
 
 void DefaultLedsON()
 {
-  float n_ypr[3] = {0};
+int16_t n_aa[3] = {0};
             // get rid of negative numbers to make mapping work
-            if (ypr[1] < 0)
+            if (aa.x < 0)
               {
-                n_ypr[1] = -ypr[1];
-                ypr[1] = 0;
+                n_aa[0] = -aa.x;
+                aa.x = 0;
               }
               
-             if (ypr[2] < 0)
+             if (aa.y < 0)
              {
-              n_ypr[2] = -ypr[2];
-              ypr[2] = 0;
+              n_aa[1] = -aa.y;
+              aa.y = 0;
              }
 
         
 //map each side to color intensity
-  int LedsPosY  = map(ypr[2]*(180/M_PI), 0, 70, 0, 255);
-  int LedsPosX = map(ypr[1]*(180/M_PI), 0, 70, 0, 255);
-  int LedsNegY = map(n_ypr[2]*(180/M_PI), 0, 70, 0, 255);
-  int LedsNegX  = map(n_ypr[1]*(180/M_PI), 0, 70, 0, 255);
+  int LedsPosY  = map(aa.y, 0, 7000, 0, 255);
+  int LedsPosX = map(aa.x, 0, 7000, 0, 255);
+  int LedsNegY = map(n_aa[1], 0, 7000, 0, 255);
+  int LedsNegX  = map(n_aa[0], 0, 7000, 0, 255);
 
         /*Serial.print("\t");
         Serial.print(LedsPosY); Serial.print("\t");
@@ -551,75 +627,36 @@ for (int i = 0; i < 12; i++)
         leds[i] = CRGB::Black;
         leds[i] += CRGB(0,0,10);
         leds[i] += CRGB(ledintensity[i], 0, 0);
-        
-        if (i == 1 || i == 2)
-        {
-          leds[i] -= CRGB(0, 0, ledintensity[i]);
-        }
-        else if (i == 4 || i == 5)
-        {
-        leds[i] -= CRGB(ledintensity[i], 0, ledintensity[i]);
-        leds[i] += CRGB(0, 0, ledintensity[i]);
-        }
-        else if (i == 7 || i == 8)
-        {
-          leds[i] -= CRGB(ledintensity[i], 0, ledintensity[i]);
-          leds[i] += CRGB(0, ledintensity[i], 0);
-        }
-        else if (i == 10 || i == 11)
-        {
-          leds[i] -= CRGB(0, 0, ledintensity[i]);
-          leds[i] += CRGB(0, ledintensity[i], 0);
-        }
         }
         FastLED.show();
         return;
 }
 
-void RotationLedsON()
+void RotationLedsON(bool type)
 {
      if ((ypr[0] * 180/M_PI) < 0)
         ypr[0] = 360 + (ypr[0] * (180/M_PI));
       else
         ypr[0] = ypr[0] * (180/M_PI);
 
-     if (!LEFT_ON2)
+     if (!type) //if false, then do rotation with 3 leds
      {
         for (int i=0; i < 12; i++)
             {
               leds[i] = CRGB::Black;
-              leds[i] = ledpick(i);
+              leds[i] = ledpick(i); //3 leds rotation code
             }
      }
-     else if (LEFT_ON2)
+     else if (type) //if true, then do rotation with raondow
      {
           for (int i=0; i < 12; i++)
             {
               leds[i] = CRGB::Black;
-              leds[i] = ledpick_two(i);
+              leds[i] = ledpick_two(i); //rainbow rotation code
            }
      }
             FastLED.show();
 }
-
-
-/*
-//led light rotation from FASTLED library
-void RaindowsLedsON()
-{
-          ChangePalettePeriodically();
-    
-    static uint8_t startIndex = 0;
-    startIndex = startIndex + 1; // motion speed 
-    FillLEDsFromPaletteColors( startIndex);
-    
-    FastLED.show();
-   FastLED.delay(1000 / UPDATES_PER_SECOND);
-        
-        return;
-  
-}*/
-
 
 void FillLEDsFromPaletteColors( uint8_t colorIndex)
 {
