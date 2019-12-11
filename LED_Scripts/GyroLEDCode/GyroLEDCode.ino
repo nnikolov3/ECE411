@@ -1,6 +1,5 @@
 #include <FastLED.h>
 #include "I2Cdev.h"
-//#include "MPU6050.h"
 #include "MPU6050_6Axis_MotionApps20.h"
 
 // Arduino Wire library is required if I2Cdev I2CDEV_ARDUINO_WIRE implementation
@@ -20,26 +19,22 @@ MPU6050 accelgyro;
 
 #define LED_PIN     5
 #define NUM_LEDS    12
-#define BRIGHTNESS  100
+#define BRIGHTNESS  75
 #define LED_TYPE    WS2812
 #define COLOR_ORDER GRB
 #define INTERRUPT_PIN 3
 #define CHARGING 2
 
+//SENSITIVITY VALUES:
+  uint16_t SHAKE_THRESHOLD = 250;  //Change to change shake sensitivity
+  const float Sensitivity = 1.5;  //tilt light sensitivity
+////////////////////////////////////
 
-
-//Smoothing globals
-  const float Sensitivity = 1.5;
-  const int numReadings = 10;
-  int readIndex = 0;              // the index of the current reading
-  
-  int readingsx[numReadings];      // the readings from the analog input
-  int readingsy[numReadings];      // the readings from the analog input
-  //int readingsz[numReadings];      // the readings from the analog input
-  
 unsigned long prevTime = millis(); //time used for shake detect
 uint16_t prevaa[3] = {0};
 
+
+//Counters for tilt mode change
 uint8_t PosXCounter = 0;
 uint8_t NegXCounter = 0;
 uint8_t PosYCounter = 0;
@@ -434,22 +429,22 @@ void MeasureGyro(bool gyro_on)
 //////////////////////////////////
 bool detectShake()
 {
-  uint16_t SHAKE_THRESHOLD = 250;  //Change to change shake sensitivity
-  if ((millis() - prevTime) > 100)
+
+  if ((millis() - prevTime) > 100)  //runs ever 100 ms
   {
-    unsigned long diffTime = (millis() - prevTime);
-    prevTime = millis();
+    unsigned long diffTime = (millis() - prevTime);  //finds time difference between last event and current event
+    prevTime = millis();  //updates last event tracker
 
-    signed int tempCalc = (aa.z - prevaa[2]);
+    signed int tempCalc = (aa.z - prevaa[2]);  //find difference between last and current even distance
     
-    float gspeed =  abs(tempCalc) / diffTime;
-
+    float gspeed =  abs(tempCalc) / diffTime;  //find difference over time,
+    
           Serial.print("\t"); Serial.print("gspeed: ");
                 Serial.print(gspeed); Serial.print("\t");
 
    prevaa[2] = aa.z;
 
-    if (gspeed > SHAKE_THRESHOLD){
+    if (gspeed > SHAKE_THRESHOLD){  //compare difference over time to threshold
       return true;
 
       Serial.print("\t");
@@ -512,6 +507,11 @@ void OutputLight(bool light_on)
     return;
 }
 
+///////////////////////////////////
+//modeChange(), signifies when a different pattern or on/off is chosen
+//depends on uint8 input, has different change type
+//////////////////////////////////
+
 void modeChange(uint8_t temp)
 {
   if (temp == 0) //blue green for color state machine
@@ -553,22 +553,26 @@ void modeChange(uint8_t temp)
   return;
 }
 
-
-void DefaultLedsON()
+///////////////////////////////////////////////////////////
+//DefaultLedsON()
+//Default color, blur and purple, changed by tilt
+//////////////////////////////////////////////////////////
+void DefaultLedsON(uint8_t temp)
 {
-int16_t n_aa[3] = {0};
-            // get rid of negative numbers to make mapping work
-            if (aa.x < 0)
-              {
-                n_aa[0] = -aa.x;
-                aa.x = 0;
-              }
-              
-             if (aa.y < 0)
-             {
-              n_aa[1] = -aa.y;
-              aa.y = 0;
-             }
+  
+  int16_t n_aa[3] = {0};
+              // get rid of negative numbers to make mapping work
+              if (aa.x < 0)
+                {
+                  n_aa[0] = -aa.x;  //create abs x
+                  aa.x = 0;
+                }
+                
+               if (aa.y < 0)
+               {
+                n_aa[1] = -aa.y; //create abs y
+                aa.y = 0;
+               }
 
         
 //map each side to color intensity
@@ -618,19 +622,52 @@ int16_t n_aa[3] = {0};
       ledintensity[10] = LedsPosY + .1*LedsNegX;
       ledintensity[11] = LedsPosY + .1*LedsPosX;
 
-
-
-for (int i = 0; i < 12; i++)
-      {
-        if (ledintensity[i] > 255)
-          ledintensity[i] = 255;
-        leds[i] = CRGB::Black;
-        leds[i] += CRGB(0,0,10);
-        leds[i] += CRGB(ledintensity[i], 0, 0);
-        }
-        FastLED.show();
-        return;
+if (temp == 0)
+{
+    for (int i = 0; i < 12; i++)
+          {
+            if (ledintensity[i] > 255)
+              ledintensity[i] = 255;
+            leds[i] = CRGB::Black;
+            leds[i] += CRGB(0,0,10);
+            leds[i] += CRGB(ledintensity[i], 0, 0);
+            }
+            FastLED.show();
+            return;
+    }
 }
+
+  else if (temp == 1)
+{
+    for (int i = 0; i < 12; i++)
+          {
+            if (ledintensity[i] > 255)
+              ledintensity[i] = 255;
+            leds[i] = CRGB::Black;
+            leds[i] += CRGB(10,10,0);
+            leds[i] += CRGB(ledintensity[i], 0, 0);
+            }
+            FastLED.show();
+            return;
+    }
+}
+
+  else if (temp == 2)
+{
+    for (int i = 0; i < 12; i++)
+          {
+            if (ledintensity[i] > 255)
+              ledintensity[i] = 255;
+            leds[i] = CRGB::Black;
+            leds[i] += CRGB(0,10,0);
+            leds[i] += CRGB(ledintensity[i], 0, 0);
+            }
+            FastLED.show();
+            return;
+    }
+}
+
+
 
 void RotationLedsON(bool type)
 {
@@ -712,8 +749,10 @@ CRGB ledpick(int i)
 
 
 
-
+//////////////////////////////////////////////////
+//ledpick_two, enables ever led and rotates around a ranbow color
 //roation logic
+////////////////////////////////////////////////
 CRGB ledpick_two(int i)
 {
   int j = 11 - i;
