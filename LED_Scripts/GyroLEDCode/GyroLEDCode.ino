@@ -1,3 +1,51 @@
+/* ============================================
+I2Cdev device library code is placed under the MIT license
+Copyright (c) 2012 Jeff Rowberg
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+===============================================
+*/
+
+/*
+ The MIT License (MIT)
+
+Copyright (c) 2013 FastLED
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+
 #include <FastLED.h>
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
@@ -93,6 +141,7 @@ bool DEF = true; //true here
 volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
 void dmpDataReady() {
     mpuInterrupt = true;
+    Serial.print("interrupt reached");
 }
 
 
@@ -195,15 +244,15 @@ switch(currentState)
 {
   case IDLE1: if(deboCharging())
   { idle(); 
-  Serial.print("S: IDLE1");  //Idle mode, startup
+  Serial.print("S: IDLE1");  //Idle mode, startup //lights are off, things charging
   }
-  
   else 
-  {currentState = MODE11; mode11(); 
+  {currentState = MODE11; mode11(); //Not charging, then go into mode 11
   Serial.print("S: MODE11");
   };
   break;
-  case MODE11: if(!CUBE_FLIPPED && !deboCharging()) 
+/////////////////////////////////////////////////////////  
+  case MODE11: if(!CUBE_FLIPPED && !deboCharging()) //Not charging and leds are on in this mode
   {mode11(); Serial.print("\n");}
   
   else if(CUBE_FLIPPED)
@@ -212,8 +261,8 @@ switch(currentState)
   else if(deboCharging())
   {currentState = MODE0; mode0();Serial.print("S: Charging, lights on \n");};
   break;
-  
-  case MODE12: if(!CUBE_FLIPPED  && !deboCharging())
+/////////////////////////////////////////////////////////
+  case MODE12: if(!CUBE_FLIPPED  && !deboCharging())  //it isn't charging, but lights are off
   {mode12();Serial.print("S: Disconnected from Charger, lights off \n");}
   
   else if(CUBE_FLIPPED)
@@ -222,15 +271,16 @@ switch(currentState)
   else if(deboCharging())
   {currentState = IDLE1; idle();Serial.print("S: Charging, lights off \n");}
   break;
+/////////////////////////////////////////////////////////
   case MODE0: if(deboCharging())
   {mode0();Serial.print("Charging, lights on (2) \n");}
   else
   {currentState = MODE11;mode11();Serial.print("S: Disconnected from charger, lighhts on (3) \n");}
   break;
   } // end switch state;
-        }
+        
     }  
-
+}
     // reset interrupt flag and get INT_STATUS byte
     mpuInterrupt = false;
     mpuIntStatus = accelgyro.getIntStatus();
@@ -557,8 +607,9 @@ void modeChange(uint8_t temp)
 //DefaultLedsON()
 //Default color, blur and purple, changed by tilt
 //////////////////////////////////////////////////////////
-void DefaultLedsON(uint8_t temp)
+void DefaultLedsON()
 {
+  uint8_t temp = 0;
   
   int16_t n_aa[3] = {0};
               // get rid of negative numbers to make mapping work
@@ -635,7 +686,6 @@ if (temp == 0)
             FastLED.show();
             return;
     }
-}
 
   else if (temp == 1)
 {
@@ -650,7 +700,6 @@ if (temp == 0)
             FastLED.show();
             return;
     }
-}
 
   else if (temp == 2)
 {
@@ -665,9 +714,8 @@ if (temp == 0)
             FastLED.show();
             return;
     }
+
 }
-
-
 
 void RotationLedsON(bool type)
 {
