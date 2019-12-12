@@ -113,12 +113,6 @@ CRGB leds[NUM_LEDS];
 enum state_enum{IDLE1,MODE11,MODE12,MODE0};
 
 
-CRGBPalette16 currentPalette;
-TBlendType    currentBlending;
-
-extern CRGBPalette16 myRedWhiteBluePalette;
-extern const TProgmemPalette16 myRedWhiteBluePalette_p PROGMEM;
-
 int16_t ax, ay, az;
 int16_t gx, gy, gz;
 
